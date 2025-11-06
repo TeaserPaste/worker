@@ -1,0 +1,85 @@
+# Tên của Workflow
+name: Worker Sync & Purge (Hourly)
+
+# Kích hoạt Workflow
+on:
+  # Chạy theo lịch (Cronjob): Chạy vào phút thứ 0 của mỗi giờ
+  schedule:
+    - cron: '0 * * * *'
+  # Cho phép chạy thủ công
+  workflow_dispatch:
+    inputs:
+      log_level:
+        description: 'Logging level (DEBUG/INFO/WARN/ERROR)'
+        required: false
+        default: 'INFO'
+
+# Định nghĩa các biến môi trường được sử dụng trong tất cả các steps
+env:
+  # Firebase Secrets
+  FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+  FIREBASE_CLIENT_EMAIL: ${{ secrets.FIREBASE_CLIENT_EMAIL }}
+  FIREBASE_PRIVATE_KEY: ${{ secrets.FIREBASE_PRIVATE_KEY }}
+  # OpenSearch Secrets
+  OPENSEARCH_HOST: ${{ secrets.OPENSEARCH_HOST }}
+  OPENSEARCH_PORT: ${{ secrets.OPENSEARCH_PORT }}
+  OPENSEARCH_USER: ${{ secrets.OPENSEARCH_USER }}
+  OPENSEARCH_PASSWORD: ${{ secrets.OPENSEARCH_PASSWORD }}
+  OPENSEARCH_INDEX: ${{ vars.OPENSEARCH_INDEX || 'snippets' }}
+  # R2 Secrets
+  R2_ENDPOINT_URL: ${{ secrets.R2_ENDPOINT_URL }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+  R2_RECOVERY_PREFIX: ${{ vars.R2_RECOVERY_PREFIX || 'deleted_snippets/' }}
+  # Logging & Notify
+  D1_LOG_API_URL: ${{ secrets.D1_LOG_API_URL }}
+  DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+# Các Jobs cần chạy
+jobs:
+  run-worker-sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: ⬇️ Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' 
+      
+      # --- Caching venv (BƯỚC MỚI) ---
+      - name: ⚙️ Cache Python dependencies
+        uses: actions/cache@v4.3.0
+        id: cache-venv
+        with:
+          path: .venv
+          key: ${{ runner.os }}-venv-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-venv-
+
+      # --- Cài đặt dependencies (BƯỚC MỚI) ---
+      - name: 🛠️ Install dependencies
+        if: steps.cache-venv.outputs.cache-hit != 'true'
+        run: |
+          echo "Cache missed. Installing virtual environment and dependencies."
+          python -m venv .venv
+          source .venv/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements.txt
+      
+      # --- Kích hoạt Venv & Thực thi Worker ---
+      - name: 🚀 Run Worker Script
+        # Thêm biến môi trường LOG_LEVEL, ưu tiên giá trị nhập thủ công (inputs)
+        env:
+          LOG_LEVEL: ${{ github.event.inputs.log_level || env.LOG_LEVEL_DEFAULT }}
+        run: |
+          echo "Activating virtual environment and executing worker.py..."
+          # Kích hoạt venv (sử dụng cache hoặc cài mới)
+          source .venv/bin/activate
+          # Chạy script Python
+          python worker.py
+          # Logging
+          LOG_LEVEL: "INFO" # Bạn có thể override ở đây
