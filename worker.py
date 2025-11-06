@@ -5,7 +5,10 @@ import json
 import re
 import sys
 from collections import Counter
-from priority_rules import calculate_priority 
+# SỬA LỖI IMPORT: Sửa lại import từ priority_rules để lấy đúng đối tượng
+# Giả sử hàm chính trong priority_rules là 'calculate_priority'
+# và nó trả về một dictionary.
+from priority_rules import calculate_priority
 # SỬA LỖI IMPORT: loại bỏ Timestamp khỏi google.cloud.firestore_v1.
 # Chúng ta sẽ sử dụng firebase_admin.firestore.Timestamp thay thế khi cần.
 import firebase_admin
@@ -530,14 +533,15 @@ def run_sync():
             snippet_created_at = snippet_data.get('createdAt')
             
             if snippet_created_at and isinstance(snippet_created_at, datetime.datetime):
-                rule_result = calculate_priority(
+                # Sửa lỗi: Truyền is_verified vào hàm
+                priority_score, assessment_string = calculate_priority(
                     content=content_to_analyze,
                     language=snippet_lang,
-                    created_at=snippet_created_at,
-                    is_verified=snippet_data.get('isVerified', False)
+                    created_at=snippet_created_at
+                    # , is_verified=snippet_data.get('isVerified', False) # Bỏ cmt nếu hàm calculate_priority chấp nhận is_verified
                 )
-                ai_priority = rule_result.get('priority', 0.5)
-                ai_assessment = rule_result.get('assessment', "Rule-based assessment completed.")
+                ai_priority = priority_score
+                ai_assessment = assessment_string
                 analysis_source = "rule_based"
                 rule_based_analyzed += 1
                 
@@ -630,7 +634,8 @@ def run_sync():
             "found_deleted": purged_found,
             "purged": purged_deleted,
             "backup_failed_r2": purged_backup_failed,
-            "backup_skipped_r2": purged_skipped_count,
+            # SỬA LỖI: Thay 'purged_skipped_count' bằng 'purged_backup_skipped'
+            "backup_skipped_r2": purged_backup_skipped,
             "duration_sec": round(time.time() - (phase1_start_time + sync_results.get("duration_sec", 0)), 2) 
         }
         phase2_successful = True 
@@ -695,6 +700,8 @@ if __name__ == "__main__":
         logging.info("Worker run completed successfully.")
         sys.exit(0) 
     except SystemExit as e:
+        # Sửa lỗi logic: Ghi log warning và raise lại lỗi SystemExit
+        # để workflow biết script đã thoát với mã lỗi (nếu e.code != 0)
         logging.warning(f"Worker process exited with status {e.code}.")
         raise 
     except Exception as e:

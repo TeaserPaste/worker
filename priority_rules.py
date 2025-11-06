@@ -371,7 +371,8 @@ def calculate_comment_utility(content: str, language: str) -> float:
 
 # --- MAIN CALCULATION FUNCTION ---
 
-def calculate_priority(content: str, language: str, created_at: datetime.datetime) -> (float, str):
+# SỬA LỖI: Thay đổi kiểu trả về từ (float, str) sang tuple[float, str]
+def calculate_priority(content: str, language: str, created_at: datetime.datetime) -> tuple[float, str]:
     """
     Calculates the final priority score (0.1 to 1.0) using the advanced rule-based engine.
     
