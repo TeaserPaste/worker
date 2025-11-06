@@ -20,12 +20,6 @@ import uuid
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
-# LƯU Ý: Đối tượng Firestore Timestamp vẫn có thể được truy cập thông qua:
-# `firestore.client()._firestore_api.times_stamp.Timestamp` (Không nên dùng)
-# hoặc an toàn hơn: `type(db.collection('snippets').document().get(['createdAt']).get('createdAt'))`
-# Python tự động chuyển đổi Timestamp từ Firestore thành datetime.datetime khi đọc,
-# nên chúng ta chỉ cần dùng `datetime.datetime` là đủ cho phần lớn logic.
-
 # --- Cấu hình logging ---
 log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
 # Set logging level cho module priority_rules
@@ -36,7 +30,8 @@ logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("opensearch").setLevel(logging.WARNING)
 logging.getLogger("boto3").setLevel(logging.WARNING) 
 logging.getLogger("botocore").setLevel(logging.WARNING) 
-logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - [%(funcName)s] %(message)s')
+# LƯU Ý: Đã thay đổi tên file log thành worker.py trong format
+logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - [%(funcName)s] %(message)s') 
 
 # Load .env 
 load_dotenv()
@@ -83,7 +78,7 @@ opensearch_host = os.getenv("OPENSEARCH_HOST")
 opensearch_port = int(os.getenv("OPENSEARCH_PORT", 9200))
 opensearch_user = os.getenv("OPENSEARCH_USER")
 opensearch_password = os.getenv("OPENSEARCH_PASSWORD")
-opensearch_scheme = os.getenv("OPENSEARCH_SCHEME", "httpsH")
+opensearch_scheme = os.getenv("OPENSEARCH_SCHEME", "https") # FIX: Mặc định là HTTPS
 opensearch_index = os.getenv("OPENSEARCH_INDEX", "snippets")
 
 if not opensearch_host:
@@ -136,7 +131,7 @@ else:
 D1_LOG_API_URL = os.getenv("D1_LOG_API_URL")
 session_id = None 
 
-# --- D1 Logging Functions (Giữ nguyên) ---
+# --- D1 Logging Functions ---
 def open_log_session(app_name="os_sync_worker"):
     """Opens a new logging session with the D1 API."""
     global session_id
@@ -243,7 +238,7 @@ def close_log_session():
         logging.error(f"Unexpected error closing D1 log session {current_session}: {e}")
 
 
-# --- Discord Notification Function (Giữ nguyên) ---
+# --- Discord Notification Function ---
 def send_discord_notification(message=None, embeds=None, level="info"):
     """Sends a notification to the configured Discord webhook."""
     discord_webhook_url_local = os.getenv("DISCORD_WEBHOOK_URL")
@@ -280,7 +275,7 @@ def send_discord_notification(message=None, embeds=None, level="info"):
         logging.error(f"Unexpected error sending Discord notification: {e}")
 
 
-# --- Get Last Processed Timestamp from OpenSearch (Giữ nguyên) ---
+# --- Get Last Processed Timestamp from OpenSearch ---
 def get_last_processed_timestamp():
     """Fetches the latest 'processed_at' timestamp from the OpenSearch index."""
     if not os_client:
@@ -315,10 +310,11 @@ def get_last_processed_timestamp():
         logging.error(f"OpenSearch request error getting max timestamp: Status {e.status_code}, Info: {e.info}, Error: {e.error}")
         return None
     except Exception as e:
+        # Lỗi kết nối OpenSearch
         logging.error(f"Error getting last processed timestamp from OpenSearch: {e}", exc_info=True)
         return None
 
-# --- Phase 2: Purge Deleted Snippets (Giữ nguyên) ---
+# --- Phase 2: Purge Deleted Snippets ---
 def purge_deleted_snippets():
     """
     Queries Firestore for 'deleted' snippets, backs them up to R2,
@@ -362,7 +358,8 @@ def purge_deleted_snippets():
             if s3_client and r2_bucket_name: 
                 try:
                     snippet_data = doc.to_dict()
-                    recovery_json = json.dumps(snippet_data, default=str)
+                    # Sử dụng default=str để đảm bảo datetime.datetime và firestore.Timestamp có thể JSON hóa
+                    recovery_json = json.dumps(snippet_data, default=str) 
                     
                     today_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
                     unique_filename = f"{today_str}_{uuid.uuid4()}.json"
@@ -523,7 +520,11 @@ def run_sync():
             snippet_lang = snippet_data.get('language', 'plaintext')
             snippet_created_at = snippet_data.get('createdAt')
             
-            if snippet_created_at and isinstance(snippet_created_at, datetime.datetime):
+            # Khắc phục lỗi: Đảm bảo snippet_created_at là datetime
+            if snippet_created_at and isinstance(snippet_created_at, (datetime.datetime, firestore.Timestamp)):
+                if isinstance(snippet_created_at, firestore.Timestamp):
+                    snippet_created_at = snippet_created_at.to_datetime()
+                    
                 rule_result = calculate_priority(
                     content=content_to_analyze,
                     language=snippet_lang,
@@ -540,9 +541,9 @@ def run_sync():
                     analysis_source = "rule_skip"
                     log_event("skipped_by_rule_indexing", snippet_id=snippet_id, details={"priority": ai_priority}, status="INFO")
             else:
-                # Dữ liệu thiếu createdAt
+                # Dữ liệu thiếu createdAt hoặc sai kiểu dữ liệu
                 ai_priority = 0.1
-                ai_assessment = "CRITICAL ERROR: Missing createdAt field. Priority set to minimum."
+                ai_assessment = "CRITICAL ERROR: Missing or invalid createdAt field. Priority set to minimum."
                 analysis_source = "data_error"
                 log_event("missing_created_at_error", details={"priority": ai_priority}, status="ERROR", snippet_id=snippet_id)
             
@@ -556,17 +557,22 @@ def run_sync():
             enriched_data['ai_is_flagged'] = False # Mặc định là False
             
             created_at = enriched_data.get('createdAt'); updated_at = enriched_data.get('updatedAt'); expires_at_val = enriched_data.get('expiresAt')
-            if isinstance(created_at, datetime.datetime): enriched_data['createdAt'] = created_at.isoformat()
-            if isinstance(updated_at, datetime.datetime): enriched_data['updatedAt'] = updated_at.isoformat()
-            if isinstance(expires_at_val, datetime.datetime): enriched_data['expiresAt'] = expires_at_val.isoformat()
-            elif expires_at_val is not None and not isinstance(expires_at_val, str):
-                 if 'expiresAt' in enriched_data: del enriched_data['expiresAt'] 
             
+            # Chuyển đổi Timestamp/datetime sang ISO string cho OpenSearch
             for key, val in enriched_data.items():
                 if isinstance(val, datetime.datetime):
                     enriched_data[key] = val.isoformat()
-                elif isinstance(val, firestore.Timestamp): # SỬ DỤNG firestore.Timestamp
+                elif isinstance(val, firestore.Timestamp): 
                      enriched_data[key] = val.to_datetime().isoformat()
+                elif key == 'expiresAt' and val is not None and not isinstance(val, str):
+                     if 'expiresAt' in enriched_data: del enriched_data['expiresAt']
+            
+            # Đảm bảo các trường chính đã được chuyển đổi (mặc dù đã xử lý trong vòng lặp)
+            if 'createdAt' in enriched_data and isinstance(enriched_data['createdAt'], datetime.datetime):
+                 enriched_data['createdAt'] = enriched_data['createdAt'].isoformat()
+            if 'updatedAt' in enriched_data and isinstance(enriched_data['updatedAt'], datetime.datetime):
+                 enriched_data['updatedAt'] = enriched_data['updatedAt'].isoformat()
+
 
             action = { "_op_type": "index", "_index": opensearch_index, "_id": snippet_id, "_source": enriched_data }; actions.append(action)
 
@@ -648,7 +654,6 @@ def run_sync():
     summary_desc_parts = [f"**Index Phase ({sync_results.get('duration_sec', 'N/A')}s):**"]
     summary_desc_parts.append(f"  Type: {sync_results.get('type', 'N/A')}")
     summary_desc_parts.append(f"  Checked: {sync_results.get('processed', 'N/A')} | Expired: {sync_results.get('expired', 'N/A')} | Skipped (Rules): {sync_results.get('skipped_rules', 'N/A')}")
-    # Cập nhật dòng summary (chỉ còn Rule-based)
     summary_desc_parts.append(f"  Rule-based Analyzed: {sync_results.get('rule_based_analyzed', 'N/A')}")
     summary_desc_parts.append(f"  Indexed: {sync_results.get('indexed', 'N/A')} | Index Fail: {sync_results.get('index_failed', 'N/A')}")
     if sync_results.get('status') == 'critical_error': summary_desc_parts.append(f"  **Status: CRITICAL ERROR**")
