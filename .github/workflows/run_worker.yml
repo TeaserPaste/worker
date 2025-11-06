@@ -40,6 +40,7 @@ env:
 jobs:
   run-worker-sync:
     runs-on: ubuntu-latest
+    environment: worker # <--- ĐÃ THÊM MÔI TRƯỜNG 'worker'
     
     steps:
       - name: ⬇️ Checkout code
