@@ -1,26 +1,29 @@
 import re
 import datetime
 from collections import Counter
+import math
+import pygments
+from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.token import Token, String, Comment
 
 # --- Cấu hình Trọng số (Weights) và Ngưỡng (Thresholds) ---
 WEIGHTS = {
-    'length': 0.35,          # Trọng số cho Độ dài
-    'syntax': 0.30,          # Trọng số cho Mật độ cú pháp/đa dạng
-    'utility': 0.25,         # Trọng số cho Độ hữu dụng (Comment/Line Length)
+    'length': 0.25,          # Trọng số cho Độ dài (giảm nhẹ)
+    'syntax': 0.40,          # Trọng số cho Phân tích Cú pháp (tăng mạnh)
+    'utility': 0.25,         # Trọng số cho Độ hữu dụng (Comment/Readability)
     'age': 0.10,             # Trọng số cho Độ mới (Age decay)
-    'base_score': 0.20       # Điểm cơ sở tối thiểu cho code không phải spam
 }
 
 # Ngưỡng và Giá trị tối ưu
 THRESHOLDS = {
-    'optimal_length': 4000,  # Chiều dài tối ưu cho snippet (tính bằng ký tự)
-    'min_length_for_analysis': 100, # Độ dài tối thiểu để bắt đầu phân tích sâu
-    'min_lines': 5,          # Số dòng tối thiểu cho code phức tạp
-    'max_url_density': 0.10, # Mật độ URL tối đa (URL chars / total chars)
-    'n_gram_size': 3,        # Kích thước N-Gram cho phân tích đa dạng
-    'optimal_comment_ratio_min': 0.10, # Tỷ lệ comment tối ưu (min)
-    'optimal_comment_ratio_max': 0.35, # Tỷ lệ comment tối ưu (max)
-    'line_length_penalty_threshold': 40 # Độ dài dòng trung bình tối thiểu (tránh code dòng đơn)
+    'optimal_length': 4000,  # Chiều dài tối ưu cho snippet
+    'min_length_for_analysis': 80, # Giảm nhẹ ngưỡng tối thiểu
+    'min_lines_for_complexity': 5, # Số dòng tối thiểu để đánh giá độ phức tạp
+    'max_line_length': 120,  # Phạt các dòng quá dài
+    'min_avg_line_length': 15, # Phạt các dòng quá ngắn (tránh code bị gộp dòng)
+    'long_comment_threshold': 20, # Số ký tự tối thiểu cho một comment chất lượng
+    'gibberish_threshold': 0.4, # Ngưỡng phát hiện vô nghĩa (tỷ lệ nguyên âm/phụ âm)
+    'long_unbroken_string': 100 # Ngưỡng phát hiện Base64/obfuscation
 }
 
 # Điểm cơ sở theo ngôn ngữ
@@ -55,12 +58,41 @@ DECAY_RATES_DAYS = {
     'default': 120  # 4 tháng
 }
 
-# --- Whitelist / Blacklist ---
-# Các từ khóa cao cấp (giúp các snippet ngắn nhưng chất lượng cao đạt điểm)
+# --- Whitelist / Blacklist / Keywords ---
+
+# Từ khóa có trọng số: cao hơn cho các chủ đề phức tạp hoặc hiện đại
 HIGH_VALUE_KEYWORDS = {
-    'dockerfile', 'kubernetes', 'aws lambda', 'ci/cd', 'async', 'microservice',
-    'decorator', 'useEffect', 'useState', 'nextjs', 'react hook', 'tailwind'
+    # DevOps & Cloud
+    'dockerfile': 3.0, 'kubernetes': 3.0, 'terraform': 2.8, 'aws lambda': 2.5,
+    'ci/cd': 2.2, 'github actions': 2.2, 'argocd': 2.7,
+    # Backend & API
+    'async': 1.8, 'await': 1.5, 'goroutine': 2.0, 'microservice': 2.5,
+    'fastapi': 2.0, 'graphql': 2.3, 'grpc': 2.5,
+    # Frontend & UI
+    'react': 1.5, 'vue': 1.5, 'svelte': 1.8,
+    'useEffect': 2.5, 'useState': 2.0, 'nextjs': 2.2, 'redux': 1.8,
+    'tailwind': 1.7, 'vite': 1.5,
+    # Data & ML
+    'pandas': 2.0, 'numpy': 1.8, 'scikitlearn': 2.2, 'pytorch': 2.5, 'tensorflow': 2.5,
+    # Python Specific
+    'decorator': 2.0, 'contextmanager': 2.2, 'pydantic': 2.0,
+    # SQL
+    'join': 1.5, 'with': 1.8, 'group by': 1.5, 'window function': 2.5
 }
+
+# Các "Contextual Combos": nhân điểm thưởng nếu các cặp từ khóa xuất hiện cùng nhau
+CONTEXTUAL_COMBOS = {
+    'react_hooks': (['react', 'useEffect'], 2.0),
+    'python_async': (['python', 'async def'], 2.5),
+    'api_design': (['graphql', 'resolver'], 2.2)
+}
+
+# Regex cho các mẫu spam hoặc code chất lượng rất thấp
+SPAM_REGEX_BLACKLIST = [
+    re.compile(r'\b(hello|world|print|console\.log)\b', re.IGNORECASE),
+    re.compile(r'buy now|crypto|forex|free trial|seo services', re.IGNORECASE),
+    re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE) # "MyComponent Copyright 2023"
+]
 
 # Các TLDs (Top-Level Domains) phổ biến trong spam
 SPAM_TLDS = {'.xyz', '.top', '.tk', '.site', '.click', '.loan', '.online'}
@@ -73,39 +105,70 @@ def get_base_priority(language: str) -> float:
     lang = language.lower()
     return LANGUAGE_BASE_SCORES.get(lang, LANGUAGE_BASE_SCORES['default'])
 
+def _is_gibberish(text: str) -> bool:
+    """Checks for gibberish text based on vowel-to-consonant ratio."""
+    vowels = "aeiou"
+    consonants = "bcdfghjklmnpqrstvwxyz"
+
+    v_count = 0
+    c_count = 0
+
+    for char in text.lower():
+        if char in vowels:
+            v_count += 1
+        elif char in consonants:
+            c_count += 1
+
+    if v_count + c_count == 0:
+        return False # Not enough alphabetic characters to judge
+
+    ratio = v_count / (v_count + c_count)
+
+    # Typical English text has a vowel ratio of ~35-45%
+    # Ratios outside 15-65% are suspicious
+    return not (0.15 < ratio < 0.65)
+
 def is_spam_or_trivial(content: str) -> bool:
-    """Basic check for highly repetitive or trivial content (pre-analysis)."""
-    if not content or not content.strip(): return True
+    """Advanced check for spam, trivial, or obfuscated content."""
+    if not content or not content.strip():
+        return True
     
     content_to_check = content[:2000].strip()
     
-    # Rule: Very short content
-    if len(content_to_check) < 50:
-        if len(content_to_check.splitlines()) <= 3:
+    # Rule 1: Very short content without high-value keywords
+    if len(content_to_check) < THRESHOLDS['min_length_for_analysis']:
+        content_lower = content_to_check.lower()
+        if not any(kw in content_lower for kw in HIGH_VALUE_KEYWORDS):
             return True
-        # Allow if it contains a high-value keyword (e.g., a short React hook snippet)
-        if not any(kw in content_to_check for kw in HIGH_VALUE_KEYWORDS):
-             if len(content_to_check) < 100:
-                return True
 
-    # Rule: Highly repetitive characters
+    # Rule 2: Regex blacklist for common spam/trivial patterns
+    for pattern in SPAM_REGEX_BLACKLIST:
+        if pattern.search(content_to_check):
+            return True
+
+    # Rule 3: Gibberish detection
+    words = re.findall(r'\b\w{5,}\b', content_to_check) # Check longer words
+    if len(words) > 5 and _is_gibberish("".join(words)):
+        return True
+
+    # Rule 4: Detect long, unbroken strings (potential Base64/obfuscation)
+    if any(len(word) > THRESHOLDS['long_unbroken_string'] for word in content_to_check.split()):
+        return True
+
+    # Rule 5: Highly repetitive characters (refined)
     char_counts = Counter(c for c in content_to_check if not c.isspace())
     total_non_space = sum(char_counts.values())
     if char_counts and total_non_space > 30:
-        most_common_char, most_common_count = char_counts.most_common(1)[0]
-        threshold = 0.7 if most_common_char.isalnum() else 0.9
-        if most_common_count / total_non_space > threshold:
+        most_common_count = char_counts.most_common(1)[0][1]
+        if most_common_count / total_non_space > 0.6: # Lowered threshold
             return True
 
-    # Rule: Excessive URLs and TLD spam check
-    url_pattern = r'https?://[^\s/$.?#].[^\s]*'
-    urls = re.findall(url_pattern, content_to_check)
-    if len(urls) > 5:
-        return True # Too many URLs
-
-    for url in urls:
-        if any(url.endswith(tld) for tld in SPAM_TLDS):
-            return True # Contains spam TLD
+    # Rule 6: Excessive URLs or spam TLDs
+    urls = re.findall(r'https?://[^\s/$.?#].[^\s]*', content_to_check)
+    if len(urls) > 4:
+        return True
+    if any(url.endswith(tld) for url in urls for tld in SPAM_TLDS):
+        return True
 
     return False
 
@@ -133,138 +196,213 @@ def calculate_age_decay(created_at: datetime.datetime, language: str) -> float:
     return max(0.2, decay_score)
 
 
-def calculate_n_gram_diversity(content: str, n: int) -> float:
-    """Calculates diversity based on unique N-Grams of words."""
-    words = re.findall(r'\b\w+\b', content.lower())
-    if len(words) < n:
-        return 0.0 # Không đủ từ
-    
-    ngrams = [tuple(words[i:i + n]) for i in range(len(words) - n + 1)]
-    
-    if not ngrams:
+def analyze_structural_complexity(content: str, language: str) -> float:
+    """
+    Analyzes code complexity using Pygments for tokenization.
+    Scores based on token diversity, density of significant tokens, and language-specific heuristics.
+    """
+    try:
+        lexer = get_lexer_by_name(language, stripall=False)
+    except pygments.util.ClassNotFound:
+        lexer = get_lexer_by_name('plaintext', stripall=False)
+
+    tokens = list(pygments.lex(content, lexer))
+    if not tokens:
         return 0.0
 
-    diversity = len(set(ngrams)) / len(ngrams)
-    return min(1.0, diversity) # Đảm bảo không vượt quá 1.0
+    total_tokens = len(tokens)
+
+    # --- Metrics Calculation ---
+    significant_token_count = 0
+    unique_token_types = set()
+    language_specific_bonus = 0.0
+
+    # Define significant token types
+    significant_tokens = {
+        Token.Keyword, Token.Name.Function, Token.Name.Class, Token.Operator,
+        Token.Literal.String.Interpol, Token.Name.Decorator
+    }
+
+    token_values = [t[1] for t in tokens]
+
+    for ttype, tvalue in tokens:
+        unique_token_types.add(ttype)
+        if any(ttype in s for s in significant_tokens):
+            significant_token_count += 1
+
+    # --- Language-Specific Heuristics ---
+    lang_lower = language.lower()
+    
+    if lang_lower == 'python':
+        if 'async' in token_values and 'def' in token_values:
+            language_specific_bonus += 0.15
+        if '@' in token_values: # Decorators
+            language_specific_bonus += 0.10
+    
+    elif lang_lower in ['javascript', 'typescript']:
+        if 'async' in token_values and '=>' in token_values:
+            language_specific_bonus += 0.15
+        if 'import' in token_values or 'export' in token_values:
+            language_specific_bonus += 0.05
+        # Check for modern JS keywords
+        js_keywords = {'useEffect', 'useState', 'useContext', 'Promise'}
+        for kw in js_keywords:
+            if kw in token_values:
+                language_specific_bonus += 0.10
+
+    elif lang_lower == 'sql':
+        sql_keywords = {'JOIN', 'WITH', 'GROUP BY', 'PARTITION BY'}
+        for kw in sql_keywords:
+            if kw.upper() in [v.upper() for v in token_values]:
+                language_specific_bonus += 0.15
+
+    # --- Scoring ---
+    # 1. Density Score: (significant tokens / total tokens)
+    density_score = (significant_token_count / total_tokens) if total_tokens > 0 else 0
+
+    # 2. Diversity Score: (unique token types / total tokens) - penalized for being too short
+    # Use a log scale to reward initial diversity more
+    diversity_score = math.log1p(len(unique_token_types)) / math.log1p(total_tokens) if total_tokens > 0 else 0
+
+    # 3. Keyword Score
+    keyword_score = 0
+    content_lower = content.lower()
+    for keyword, weight in HIGH_VALUE_KEYWORDS.items():
+        if keyword in content_lower:
+            keyword_score += weight
+
+    # Apply Contextual Combos
+    for combo, (terms, multiplier) in CONTEXTUAL_COMBOS.items():
+        if all(term in content_lower for term in terms):
+            keyword_score *= multiplier
+
+    # Normalize keyword score (e.g., capped at 1.5)
+    normalized_keyword_score = min(1.5, keyword_score / 10.0)
+
+    # Final Score Combination
+    final_score = (
+        (density_score * 0.4) +
+        (diversity_score * 0.3) +
+        (normalized_keyword_score * 0.3) +
+        language_specific_bonus
+    )
+
+    return min(1.0, final_score)
 
 def calculate_comment_utility(content: str, language: str) -> float:
-    """Calculates score based on Comment/Code ratio and line length."""
+    """
+    Calculates utility score based on comment quality, readability, and structure.
+    Uses Pygments for accurate comment and docstring detection.
+    """
+    try:
+        lexer = get_lexer_by_name(language, stripall=False)
+    except pygments.util.ClassNotFound:
+        lexer = get_lexer_by_name('plaintext', stripall=False)
+
+    tokens = list(pygments.lex(content, lexer))
     lines = content.splitlines()
+    
+    if not tokens or not lines:
+        return 0.0
+
+    total_chars = len(content)
+    comment_chars = 0
+    docstring_chars = 0
+    special_comments = 0
+    long_comments = 0
+
+    for ttype, tvalue in tokens:
+        if ttype in Comment:
+            comment_chars += len(tvalue)
+            if len(tvalue) > THRESHOLDS['long_comment_threshold']:
+                long_comments += 1
+            if any(kw in tvalue for kw in ['TODO:', 'FIXME:', 'NOTE:']):
+                special_comments += 1
+        if ttype in String.Docstring:
+            docstring_chars += len(tvalue)
+
+    # --- Scoring Components ---
+
+    # 1. Comment & Docstring Ratio Score
+    comment_density = (comment_chars + docstring_chars) / total_chars if total_chars > 0 else 0
+    # Ideal density is around 15-20%
+    density_score = 1.0 - abs(comment_density - 0.18) * 3.0
+    density_score = max(0.0, density_score)
+
+    # Bonus for docstrings (highly valuable)
+    docstring_bonus = min(0.3, (docstring_chars / total_chars) * 3.0)
+    
+    # 2. Comment Quality Score
+    quality_score = 0.0
+    if comment_chars > 0:
+        quality_score += min(0.2, (special_comments * 0.1))
+        quality_score += min(0.2, (long_comments * 0.05))
+
+    # 3. Readability Penalties
     total_lines = len(lines)
-    code_lines = 0
-    comment_lines = 0
+    code_lines = [line for line in lines if line.strip()]
+    num_code_lines = len(code_lines)
+
+    long_line_penalty = 0
     total_line_length = 0
+    if num_code_lines > 0:
+        for line in code_lines:
+            line_len = len(line)
+            total_line_length += line_len
+            if line_len > THRESHOLDS['max_line_length']:
+                long_line_penalty += 0.05 # 5% penalty per long line
+
+    avg_line_length = total_line_length / num_code_lines if num_code_lines > 0 else 0
+    short_line_penalty = 0
+    if num_code_lines > THRESHOLDS['min_lines_for_complexity'] and avg_line_length < THRESHOLDS['min_avg_line_length']:
+        short_line_penalty = (THRESHOLDS['min_avg_line_length'] - avg_line_length) / THRESHOLDS['min_avg_line_length'] * 0.5
     
-    comment_markers = {
-        'python': ['#'], 'javascript': ['//', '/*'], 'typescript': ['//', '/*'],
-        'java': ['//', '/*'], 'csharp': ['//', '/*'], 'html': ['<!--'],
-        'css': ['/*', '//'], 'sql': ['--', '/*']
-    }
-    markers = comment_markers.get(language.lower(), ['#', '//'])
+    readability_score = 1.0 - min(0.5, long_line_penalty) - short_line_penalty
 
-    if total_lines == 0:
-        return 0.1
+    # --- Final Combination ---
+    final_score = (
+        (density_score * 0.5) +
+        (docstring_bonus * 0.2) +
+        (quality_score * 0.3)
+    ) * readability_score
 
-    for line in lines:
-        stripped_line = line.strip()
-        if not stripped_line:
-            continue
-            
-        is_comment = False
-        for marker in markers:
-            if stripped_line.startswith(marker):
-                is_comment = True
-                break
-        
-        if is_comment:
-            comment_lines += 1
-        else:
-            code_lines += 1
-            total_line_length += len(stripped_line)
-            
-    # Tính Tỷ lệ Comment
-    total_active_lines = code_lines + comment_lines
-    if total_active_lines == 0:
-        return 0.1 # Vẫn là trivial nếu không có dòng code/comment nào
-
-    comment_ratio = comment_lines / total_active_lines
-
-    # 1. Điểm Tỷ lệ Comment (Peak around optimal range)
-    ratio_score = 0.0
-    min_ratio = THRESHOLDS['optimal_comment_ratio_min']
-    max_ratio = THRESHOLDS['optimal_comment_ratio_max']
-    
-    if min_ratio <= comment_ratio <= max_ratio:
-        ratio_score = 1.0 # Điểm tuyệt đối nếu nằm trong vùng tối ưu
-    elif comment_ratio < min_ratio:
-        # Phạt nếu quá ít comment
-        ratio_score = comment_ratio / min_ratio * 0.8
-    else:
-        # Phạt nếu quá nhiều comment (thường là snippet dài)
-        ratio_score = max(0.5, 1.0 - (comment_ratio - max_ratio) * 1.5)
-
-    # 2. Phạt Độ dài dòng (tránh code dòng đơn)
-    line_avg = (total_line_length / code_lines) if code_lines > 0 else 0
-    length_penalty = 1.0
-    
-    if code_lines > THRESHOLDS['min_lines'] and line_avg < THRESHOLDS['line_length_penalty_threshold']:
-        # Phạt nếu code dài nhưng độ dài dòng quá ngắn
-        length_penalty = max(0.5, line_avg / THRESHOLDS['line_length_penalty_threshold'])
-
-    return ratio_score * 0.7 + length_penalty * 0.3
+    return max(0.0, min(1.0, final_score))
 
 
 # --- MAIN CALCULATION FUNCTION ---
 
 def calculate_priority(content: str, language: str, created_at: datetime.datetime) -> (float, str):
     """
-    Calculates the Rule-Based Priority Score (0.1 to 1.0) and an assessment string.
+    Calculates the final priority score (0.1 to 1.0) using the advanced rule-based engine.
     
     Returns: (priority_score, assessment_string)
     """
-    lang = language or 'plaintext'
-    lang_base_score = get_base_priority(lang)
+    lang = language.lower() if language else 'plaintext'
     
     # --- PHASE 1: PRE-CHECK (Spam/Trivial Rule) ---
     if is_spam_or_trivial(content):
-        return 0.1, "Rule-based: Highly trivial or suspected spam content."
+        return 0.1, "Assessment: Rejected (Trivial or Spam)."
     
+    lang_base_score = get_base_priority(lang)
     content_length = len(content)
-    lines = content.splitlines()
-    total_code_lines = len([line.strip() for line in lines if line.strip()])
     
-    # Nếu nội dung quá ngắn nhưng không bị đánh dấu là spam/trivial, vẫn cho điểm thấp
-    if content_length < THRESHOLDS['min_length_for_analysis']:
-        # Ngoại lệ nếu có keyword giá trị cao
-        if not any(kw in content for kw in HIGH_VALUE_KEYWORDS):
-            return max(lang_base_score * 0.4, 0.2), "Rule-based: Very short content, minimal priority."
-        
     # --- PHASE 2: SCORE COMPONENTS ---
     
-    # 1. Score Độ dài (Length Score)
-    # Tăng dần đến ngưỡng tối ưu, sau đó giữ nguyên. max(1.0)
+    # 1. Length Score
     length_score = min(1.0, content_length / THRESHOLDS['optimal_length'])
     
-    # 2. Score Độ mới (Age Decay Score)
+    # 2. Age Decay Score
     age_score = calculate_age_decay(created_at, lang)
     
-    # 3. Score Mật độ/Đa dạng (Syntax/Diversity Score) - Phase 1
-    # Dùng N-Gram Diversity làm proxy cho tính độc đáo
-    diversity_score = calculate_n_gram_diversity(content, THRESHOLDS['n_gram_size'])
-    # Tăng cường nếu có keyword cao cấp (bonus lên tới 0.3 điểm)
-    keyword_bonus = 0.0
-    if total_code_lines > 0:
-        found_keywords = {word for word in re.findall(r'\b\w+\b', content) if word in HIGH_VALUE_KEYWORDS}
-        keyword_bonus = min(0.3, len(found_keywords) * 0.05) # Max 6 keywords
-        
-    syntax_score = min(1.0, diversity_score * 0.7 + keyword_bonus * 0.3)
+    # 3. Structural Complexity Score (Code-aware analysis)
+    syntax_score = analyze_structural_complexity(content, lang)
     
-    # 4. Score Độ hữu dụng (Utility Score) - Phase 2
+    # 4. Comment & Readability Utility Score
     utility_score = calculate_comment_utility(content, lang)
     
     # --- PHASE 3: FINAL CALCULATION ---
     
-    # Tính điểm thô (Raw Score)
+    # Calculate raw score using the new weights
     raw_score = (
         WEIGHTS['length'] * length_score +
         WEIGHTS['syntax'] * syntax_score +
@@ -272,22 +410,21 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
         WEIGHTS['age'] * age_score
     )
     
-    # Áp dụng Điểm Cơ sở của ngôn ngữ
-    # Final Priority = Điểm Cơ sở * Điểm Thô (để điểm tối đa không vượt quá 1.0)
+    # The final priority is a blend of the language's base score and the calculated raw score.
+    # This ensures that good code in a low-priority language is still ranked lower than
+    # exceptional code in a high-priority language.
     final_priority = lang_base_score + (1.0 - lang_base_score) * raw_score
     
-    # Đảm bảo điểm nằm trong phạm vi 0.1 đến 1.0
+    # Ensure the score is within the valid range [0.1, 1.0]
     final_priority = max(0.1, min(1.0, final_priority))
     
     # --- ASSESSMENT STRING ---
-    
-    # Tổng hợp chi tiết để dễ debug và theo dõi
     assessment_details = (
-        f"Length:{length_score:.2f} (x{WEIGHTS['length']:.2f}), "
-        f"Diversity:{syntax_score:.2f} (x{WEIGHTS['syntax']:.2f}), "
-        f"Utility:{utility_score:.2f} (x{WEIGHTS['utility']:.2f}), "
-        f"Age:{age_score:.2f} (x{WEIGHTS['age']:.2f})"
+        f"Length:{length_score:.2f} (w:{WEIGHTS['length']}), "
+        f"Syntax:{syntax_score:.2f} (w:{WEIGHTS['syntax']}), "
+        f"Utility:{utility_score:.2f} (w:{WEIGHTS['utility']}), "
+        f"Age:{age_score:.2f} (w:{WEIGHTS['age']})"
     )
-    assessment_string = f"Rule-based: Priority={final_priority:.2f}. Details: {assessment_details}"
+    assessment_string = f"Priority={final_priority:.3f} | Details: {assessment_details}"
     
     return final_priority, assessment_string
