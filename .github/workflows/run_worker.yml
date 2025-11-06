@@ -82,5 +82,3 @@ jobs:
           source .venv/bin/activate
           # Chạy script Python
           python worker.py
-          # Logging
-          LOG_LEVEL: "INFO" # Bạn có thể override ở đây
