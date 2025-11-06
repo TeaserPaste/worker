@@ -71,4 +71,4 @@ jobs:
           # Logging
           LOG_LEVEL: "INFO" # Bạn có thể override ở đây
           
-        run: python run_worker.py
+        run: python worker.py
