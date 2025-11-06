@@ -5,12 +5,12 @@ import json
 import re
 import sys
 from collections import Counter
-from priority_rules import calculate_priority # Import hàm tính điểm từ module Rule-based
-# import google.generativeai as genai # ĐÃ XOÁ
+from priority_rules import calculate_priority 
+# SỬA LỖI IMPORT: loại bỏ Timestamp khỏi google.cloud.firestore_v1.
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
-from google.cloud.firestore_v1 import Timestamp, WriteBatch
+from google.cloud.firestore_v1 import WriteBatch # Chỉ giữ lại WriteBatch
 from opensearchpy import OpenSearch, helpers, exceptions as os_exceptions 
 from dotenv import load_dotenv 
 import datetime
@@ -19,6 +19,12 @@ import boto3
 import uuid
 from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
+
+# LƯU Ý: Đối tượng Firestore Timestamp vẫn có thể được truy cập thông qua:
+# `firestore.client()._firestore_api.times_stamp.Timestamp` (Không nên dùng)
+# hoặc an toàn hơn: `type(db.collection('snippets').document().get(['createdAt']).get('createdAt'))`
+# Python tự động chuyển đổi Timestamp từ Firestore thành datetime.datetime khi đọc,
+# nên chúng ta chỉ cần dùng `datetime.datetime` là đủ cho phần lớn logic.
 
 # --- Cấu hình logging ---
 log_level = os.environ.get('LOG_LEVEL', 'INFO').upper()
@@ -100,8 +106,6 @@ else:
         logging.error(f"Failed to initialize or ping OpenSearch client: {e}")
         os_client = None
 
-# --- Gemini API Config: ĐÃ XOÁ HOÀN TOÀN ---
-
 # --- Initialize Cloudflare R2 Client ---
 r2_endpoint_url = os.getenv("R2_ENDPOINT_URL")
 r2_access_key_id = os.getenv("R2_ACCESS_KEY_ID")
@@ -127,10 +131,6 @@ if r2_endpoint_url and r2_access_key_id and r2_secret_access_key and r2_bucket_n
 else:
     logging.warning("R2 environment variables not fully set. Snippet recovery backup will be disabled.")
 
-
-# --- Configure Cloudflare AI Fallback: ĐÃ XOÁ HOÀN TOÀN ---
-CLOUDFLARE_AI_ENDPOINT = None
-CLOUDFLARE_AI_MODEL = None 
 
 # --- Configure D1 Logging API ---
 D1_LOG_API_URL = os.getenv("D1_LOG_API_URL")
@@ -565,7 +565,7 @@ def run_sync():
             for key, val in enriched_data.items():
                 if isinstance(val, datetime.datetime):
                     enriched_data[key] = val.isoformat()
-                elif isinstance(val, Timestamp):
+                elif isinstance(val, firestore.Timestamp): # SỬ DỤNG firestore.Timestamp
                      enriched_data[key] = val.to_datetime().isoformat()
 
             action = { "_op_type": "index", "_index": opensearch_index, "_id": snippet_id, "_source": enriched_data }; actions.append(action)
