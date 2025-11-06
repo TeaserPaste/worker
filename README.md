@@ -1,6 +1,6 @@
 # TeaserPaste Worker
 
-This repository provides source code for TeaserPaste Worker, including priority logic, Indexing and Purge phase. If you want to use, read the [docs](hhttps://docs.teaserverse.online/triple-tool/teaserpaste/worker)
+This repository provides source code for TeaserPaste Worker, including priority logic, Indexing and Purge phase. If you want to use, read the [docs](https://docs.teaserverse.online/triple-tool/teaserpaste/worker)
 
 # License
 
