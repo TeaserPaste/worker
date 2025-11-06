@@ -1,0 +1,5 @@
+firebase-admin
+opensearch-py
+python-dotenv
+requests
+boto3
