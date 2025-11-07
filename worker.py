@@ -537,8 +537,8 @@ def run_sync():
                 priority_score, assessment_string = calculate_priority(
                     content=content_to_analyze,
                     language=snippet_lang,
-                    created_at=snippet_created_at
-                    # , is_verified=snippet_data.get('isVerified', False) # Bỏ cmt nếu hàm calculate_priority chấp nhận is_verified
+                    created_at=snippet_created_at,
+                    is_verified=snippet_data.get('isVerified', False)
                 )
                 ai_priority = priority_score
                 ai_assessment = assessment_string
