@@ -7,13 +7,6 @@ from pygments.lexers import get_lexer_by_name, guess_lexer
 from pygments.token import Token, String, Comment
 
 # --- Cấu hình Trọng số (Weights) và Ngưỡng (Thresholds) ---
-WEIGHTS = {
-    'length': 0.25,          # Trọng số cho Độ dài (giảm nhẹ)
-    'syntax': 0.40,          # Trọng số cho Phân tích Cú pháp (tăng mạnh)
-    'utility': 0.25,         # Trọng số cho Độ hữu dụng (Comment/Readability)
-    'age': 0.10,             # Trọng số cho Độ mới (Age decay)
-}
-
 # Ngưỡng và Giá trị tối ưu
 THRESHOLDS = {
     'optimal_length': 4000,  # Chiều dài tối ưu cho snippet
@@ -31,6 +24,7 @@ LANGUAGE_PROFILES = {
     'python': {
         'base_score': 0.60,
         'decay_days': 90,
+        'scoring_weights': {'length': 0.15, 'syntax': 0.45, 'utility': 0.30, 'age': 0.10},
         'high_value_keywords': {
             'fastapi': 2.0, 'pydantic': 2.0, 'decorator': 2.0, 'contextmanager': 2.2,
             'pandas': 2.0, 'numpy': 1.8, 'scikitlearn': 2.2, 'pytorch': 2.5, 'tensorflow': 2.5,
@@ -40,6 +34,7 @@ LANGUAGE_PROFILES = {
     'javascript': {
         'base_score': 0.50,
         'decay_days': 60,
+        'scoring_weights': {'length': 0.20, 'syntax': 0.45, 'utility': 0.25, 'age': 0.10},
         'high_value_keywords': {
             'react': 1.5, 'vue': 1.5, 'svelte': 1.8, 'nextjs': 2.2, 'vite': 1.5,
             'useEffect': 2.5, 'useState': 2.0, 'redux': 1.8, 'tailwind': 1.7,
@@ -49,29 +44,77 @@ LANGUAGE_PROFILES = {
     'typescript': {
         'base_score': 0.60,
         'decay_days': 60,
+        'scoring_weights': {'length': 0.20, 'syntax': 0.45, 'utility': 0.25, 'age': 0.10},
         'high_value_keywords': {
             'react': 1.5, 'vue': 1.5, 'svelte': 1.8, 'nextjs': 2.2, 'vite': 1.5,
             'useEffect': 2.5, 'useState': 2.0, 'redux': 1.8, 'tailwind': 1.7,
             'interface': 2.0, 'enum': 1.5, 'type': 1.5,
         }
     },
-    'java': {'base_score': 0.55, 'decay_days': 180, 'high_value_keywords': {'spring': 2.0, 'maven': 1.5}},
-    'csharp': {'base_score': 0.55, 'decay_days': 180, 'high_value_keywords': {'.net': 2.0, 'linq': 1.8}},
-    'go': {'base_score': 0.45, 'decay_days': 120, 'high_value_keywords': {'goroutine': 2.0, 'channel': 1.8}},
-    'rust': {'base_score': 0.45, 'decay_days': 120, 'high_value_keywords': {'cargo': 1.5, 'tokio': 2.0}},
+    'java': {
+        'base_score': 0.55,
+        'decay_days': 180,
+        'scoring_weights': {'length': 0.25, 'syntax': 0.40, 'utility': 0.25, 'age': 0.10},
+        'high_value_keywords': {'spring': 2.0, 'maven': 1.5}
+    },
+    'csharp': {
+        'base_score': 0.55,
+        'decay_days': 180,
+        'scoring_weights': {'length': 0.25, 'syntax': 0.40, 'utility': 0.25, 'age': 0.10},
+        'high_value_keywords': {'.net': 2.0, 'linq': 1.8}
+    },
+    'go': {
+        'base_score': 0.45,
+        'decay_days': 120,
+        'scoring_weights': {'length': 0.25, 'syntax': 0.40, 'utility': 0.25, 'age': 0.10},
+        'high_value_keywords': {'goroutine': 2.0, 'channel': 1.8}
+    },
+    'rust': {
+        'base_score': 0.45,
+        'decay_days': 120,
+        'scoring_weights': {'length': 0.25, 'syntax': 0.40, 'utility': 0.25, 'age': 0.10},
+        'high_value_keywords': {'cargo': 1.5, 'tokio': 2.0}
+    },
     'sql': {
         'base_score': 0.35,
         'decay_days': 365,
+        'scoring_weights': {'length': 0.30, 'syntax': 0.40, 'utility': 0.20, 'age': 0.10},
         'high_value_keywords': {'join': 1.5, 'with': 1.8, 'group by': 1.5, 'window function': 2.5}
     },
-    'markdown': {'base_score': 0.15, 'decay_days': 120, 'high_value_keywords': {}},
-    'plaintext': {'base_score': 0.10, 'decay_days': 120, 'high_value_keywords': {}},
-    'bash': {'base_score': 0.30, 'decay_days': 180, 'high_value_keywords': {'grep': 1.2, 'awk': 1.5, 'sed': 1.5}},
-    'html': {'base_score': 0.30, 'decay_days': 180, 'high_value_keywords': {}},
-    'css': {'base_score': 0.25, 'decay_days': 180, 'high_value_keywords': {}},
+    'markdown': {
+        'base_score': 0.15,
+        'decay_days': 120,
+        'scoring_weights': {'length': 0.40, 'syntax': 0.10, 'utility': 0.40, 'age': 0.10},
+        'high_value_keywords': {}
+    },
+    'plaintext': {
+        'base_score': 0.10,
+        'decay_days': 120,
+        'scoring_weights': {'length': 0.50, 'syntax': 0.10, 'utility': 0.30, 'age': 0.10},
+        'high_value_keywords': {}
+    },
+    'bash': {
+        'base_score': 0.30,
+        'decay_days': 180,
+        'scoring_weights': {'length': 0.30, 'syntax': 0.40, 'utility': 0.20, 'age': 0.10},
+        'high_value_keywords': {'grep': 1.2, 'awk': 1.5, 'sed': 1.5}
+    },
+    'html': {
+        'base_score': 0.30,
+        'decay_days': 180,
+        'scoring_weights': {'length': 0.40, 'syntax': 0.20, 'utility': 0.30, 'age': 0.10},
+        'high_value_keywords': {}
+    },
+    'css': {
+        'base_score': 0.25,
+        'decay_days': 180,
+        'scoring_weights': {'length': 0.40, 'syntax': 0.30, 'utility': 0.20, 'age': 0.10},
+        'high_value_keywords': {}
+    },
     'default': {
         'base_score': 0.30,
         'decay_days': 120,
+        'scoring_weights': {'length': 0.25, 'syntax': 0.40, 'utility': 0.25, 'age': 0.10},
         'high_value_keywords': {
             'dockerfile': 3.0, 'kubernetes': 3.0, 'terraform': 2.8, 'aws lambda': 2.5,
             'ci/cd': 2.2, 'github actions': 2.2, 'argocd': 2.7, 'microservice': 2.5,
@@ -409,8 +452,19 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     # --- PHASE 2: SCORE COMPONENTS ---
     
     # 1. Length Score
-    length_score = min(1.0, content_length / THRESHOLDS['optimal_length'])
-    
+    optimal_length = THRESHOLDS['optimal_length']
+    if content_length <= optimal_length:
+        length_score = content_length / optimal_length
+    else:
+        # Áp dụng hàm suy giảm (decay) cho các snippet quá dài
+        # Công thức: score = 0.2 + 0.8 * e^(-(length_ratio - 1)^2 / 4)
+        # Bắt đầu giảm từ 1.0 và tiệm cận 0.2
+        length_ratio = content_length / optimal_length
+        decay_factor = math.exp(-((length_ratio - 1) ** 2) / 4)
+        length_score = 0.2 + 0.8 * decay_factor
+
+    length_score = max(0.2, min(1.0, length_score)) # Đảm bảo score trong khoảng [0.2, 1.0]
+
     # 2. Age Decay Score
     age_score = calculate_age_decay(created_at, lang)
     
@@ -423,11 +477,14 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     # --- PHASE 3: FINAL CALCULATION ---
     
     # Calculate raw score using the new weights
+    lang_profile = LANGUAGE_PROFILES.get(lang, LANGUAGE_PROFILES['default'])
+    weights = lang_profile['scoring_weights']
+
     raw_score = (
-        WEIGHTS['length'] * length_score +
-        WEIGHTS['syntax'] * syntax_score +
-        WEIGHTS['utility'] * utility_score +
-        WEIGHTS['age'] * age_score
+        weights['length'] * length_score +
+        weights['syntax'] * syntax_score +
+        weights['utility'] * utility_score +
+        weights['age'] * age_score
     )
     
     # The final priority is a blend of the language's base score and the calculated raw score.
@@ -440,10 +497,10 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     
     # --- ASSESSMENT STRING ---
     assessment_details = (
-        f"Length:{length_score:.2f} (w:{WEIGHTS['length']}), "
-        f"Syntax:{syntax_score:.2f} (w:{WEIGHTS['syntax']}), "
-        f"Utility:{utility_score:.2f} (w:{WEIGHTS['utility']}), "
-        f"Age:{age_score:.2f} (w:{WEIGHTS['age']})"
+        f"Length:{length_score:.2f} (w:{weights['length']}), "
+        f"Syntax:{syntax_score:.2f} (w:{weights['syntax']}), "
+        f"Utility:{utility_score:.2f} (w:{weights['utility']}), "
+        f"Age:{age_score:.2f} (w:{weights['age']})"
     )
     assessment_string = f"Priority={final_priority:.3f} | Details: {assessment_details}"
     
