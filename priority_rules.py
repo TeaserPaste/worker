@@ -26,58 +26,58 @@ THRESHOLDS = {
     'long_unbroken_string': 100 # Ngưỡng phát hiện Base64/obfuscation
 }
 
-# Điểm cơ sở theo ngôn ngữ
-LANGUAGE_BASE_SCORES = {
-    'plaintext': 0.10,
-    'markdown': 0.15,
-    'javascript': 0.50,
-    'python': 0.60,
-    'java': 0.55,
-    'csharp': 0.55,
-    'typescript': 0.60,
-    'go': 0.45,
-    'rust': 0.45,
-    'sql': 0.35,
-    'bash': 0.30,
-    'html': 0.30,
-    'css': 0.25,
-    'default': 0.30
-}
-
-# Tốc độ giảm điểm theo tuổi (Decay Rate - tính bằng ngày)
-# JS/Python giảm nhanh hơn (API thay đổi)
-# C++/SQL/Java giảm chậm hơn (ít thay đổi)
-DECAY_RATES_DAYS = {
-    'javascript': 60,
-    'typescript': 60,
-    'python': 90,
-    'go': 120,
-    'rust': 120,
-    'java': 180,
-    'sql': 365,
-    'default': 120  # 4 tháng
-}
-
-# --- Whitelist / Blacklist / Keywords ---
-
-# Từ khóa có trọng số: cao hơn cho các chủ đề phức tạp hoặc hiện đại
-HIGH_VALUE_KEYWORDS = {
-    # DevOps & Cloud
-    'dockerfile': 3.0, 'kubernetes': 3.0, 'terraform': 2.8, 'aws lambda': 2.5,
-    'ci/cd': 2.2, 'github actions': 2.2, 'argocd': 2.7,
-    # Backend & API
-    'async': 1.8, 'await': 1.5, 'goroutine': 2.0, 'microservice': 2.5,
-    'fastapi': 2.0, 'graphql': 2.3, 'grpc': 2.5,
-    # Frontend & UI
-    'react': 1.5, 'vue': 1.5, 'svelte': 1.8,
-    'useEffect': 2.5, 'useState': 2.0, 'nextjs': 2.2, 'redux': 1.8,
-    'tailwind': 1.7, 'vite': 1.5,
-    # Data & ML
-    'pandas': 2.0, 'numpy': 1.8, 'scikitlearn': 2.2, 'pytorch': 2.5, 'tensorflow': 2.5,
-    # Python Specific
-    'decorator': 2.0, 'contextmanager': 2.2, 'pydantic': 2.0,
-    # SQL
-    'join': 1.5, 'with': 1.8, 'group by': 1.5, 'window function': 2.5
+# --- Language Profiles ---
+LANGUAGE_PROFILES = {
+    'python': {
+        'base_score': 0.60,
+        'decay_days': 90,
+        'high_value_keywords': {
+            'fastapi': 2.0, 'pydantic': 2.0, 'decorator': 2.0, 'contextmanager': 2.2,
+            'pandas': 2.0, 'numpy': 1.8, 'scikitlearn': 2.2, 'pytorch': 2.5, 'tensorflow': 2.5,
+            'async': 1.8, 'await': 1.5,
+        }
+    },
+    'javascript': {
+        'base_score': 0.50,
+        'decay_days': 60,
+        'high_value_keywords': {
+            'react': 1.5, 'vue': 1.5, 'svelte': 1.8, 'nextjs': 2.2, 'vite': 1.5,
+            'useEffect': 2.5, 'useState': 2.0, 'redux': 1.8, 'tailwind': 1.7,
+            'async': 1.8, 'await': 1.5, 'Promise': 1.5,
+        }
+    },
+    'typescript': {
+        'base_score': 0.60,
+        'decay_days': 60,
+        'high_value_keywords': {
+            'react': 1.5, 'vue': 1.5, 'svelte': 1.8, 'nextjs': 2.2, 'vite': 1.5,
+            'useEffect': 2.5, 'useState': 2.0, 'redux': 1.8, 'tailwind': 1.7,
+            'interface': 2.0, 'enum': 1.5, 'type': 1.5,
+        }
+    },
+    'java': {'base_score': 0.55, 'decay_days': 180, 'high_value_keywords': {'spring': 2.0, 'maven': 1.5}},
+    'csharp': {'base_score': 0.55, 'decay_days': 180, 'high_value_keywords': {'.net': 2.0, 'linq': 1.8}},
+    'go': {'base_score': 0.45, 'decay_days': 120, 'high_value_keywords': {'goroutine': 2.0, 'channel': 1.8}},
+    'rust': {'base_score': 0.45, 'decay_days': 120, 'high_value_keywords': {'cargo': 1.5, 'tokio': 2.0}},
+    'sql': {
+        'base_score': 0.35,
+        'decay_days': 365,
+        'high_value_keywords': {'join': 1.5, 'with': 1.8, 'group by': 1.5, 'window function': 2.5}
+    },
+    'markdown': {'base_score': 0.15, 'decay_days': 120, 'high_value_keywords': {}},
+    'plaintext': {'base_score': 0.10, 'decay_days': 120, 'high_value_keywords': {}},
+    'bash': {'base_score': 0.30, 'decay_days': 180, 'high_value_keywords': {'grep': 1.2, 'awk': 1.5, 'sed': 1.5}},
+    'html': {'base_score': 0.30, 'decay_days': 180, 'high_value_keywords': {}},
+    'css': {'base_score': 0.25, 'decay_days': 180, 'high_value_keywords': {}},
+    'default': {
+        'base_score': 0.30,
+        'decay_days': 120,
+        'high_value_keywords': {
+            'dockerfile': 3.0, 'kubernetes': 3.0, 'terraform': 2.8, 'aws lambda': 2.5,
+            'ci/cd': 2.2, 'github actions': 2.2, 'argocd': 2.7, 'microservice': 2.5,
+            'graphql': 2.3, 'grpc': 2.5
+        }
+    }
 }
 
 # Các "Contextual Combos": nhân điểm thưởng nếu các cặp từ khóa xuất hiện cùng nhau
@@ -89,8 +89,7 @@ CONTEXTUAL_COMBOS = {
 
 # Regex cho các mẫu spam hoặc code chất lượng rất thấp
 SPAM_REGEX_BLACKLIST = [
-    re.compile(r'\b(hello|world|print|console\.log)\b', re.IGNORECASE),
-    re.compile(r'buy now|crypto|forex|free trial|seo services', re.IGNORECASE),
+    re.compile(r'buy now|crypto|forex|free trial|seo services|online casino', re.IGNORECASE),
     re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE) # "MyComponent Copyright 2023"
 ]
 
@@ -102,8 +101,8 @@ SPAM_TLDS = {'.xyz', '.top', '.tk', '.site', '.click', '.loan', '.online'}
 
 def get_base_priority(language: str) -> float:
     """Gets the base score for the language."""
-    lang = language.lower()
-    return LANGUAGE_BASE_SCORES.get(lang, LANGUAGE_BASE_SCORES['default'])
+    profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
+    return profile['base_score']
 
 def _is_gibberish(text: str) -> bool:
     """Checks for gibberish text based on vowel-to-consonant ratio."""
@@ -128,7 +127,7 @@ def _is_gibberish(text: str) -> bool:
     # Ratios outside 15-65% are suspicious
     return not (0.15 < ratio < 0.65)
 
-def is_spam_or_trivial(content: str) -> bool:
+def is_spam_or_trivial(content: str, language: str) -> bool:
     """Advanced check for spam, trivial, or obfuscated content."""
     if not content or not content.strip():
         return True
@@ -138,7 +137,9 @@ def is_spam_or_trivial(content: str) -> bool:
     # Rule 1: Very short content without high-value keywords
     if len(content_to_check) < THRESHOLDS['min_length_for_analysis']:
         content_lower = content_to_check.lower()
-        if not any(kw in content_lower for kw in HIGH_VALUE_KEYWORDS):
+        lang_profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
+        keywords_to_check = {**LANGUAGE_PROFILES['default']['high_value_keywords'], **lang_profile['high_value_keywords']}
+        if not any(kw in content_lower for kw in keywords_to_check):
             return True
 
     # Rule 2: Regex blacklist for common spam/trivial patterns
@@ -174,7 +175,8 @@ def is_spam_or_trivial(content: str) -> bool:
 
 def calculate_age_decay(created_at: datetime.datetime, language: str) -> float:
     """Calculates age score based on decay rate."""
-    decay_days = DECAY_RATES_DAYS.get(language.lower(), DECAY_RATES_DAYS['default'])
+    profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
+    decay_days = profile['decay_days']
     
     # Ensure created_at is timezone-aware
     if created_at.tzinfo is None:
@@ -215,6 +217,7 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     # --- Metrics Calculation ---
     significant_token_count = 0
     unique_token_types = set()
+    error_token_count = 0
     language_specific_bonus = 0.0
 
     # Define significant token types
@@ -227,7 +230,9 @@ def analyze_structural_complexity(content: str, language: str) -> float:
 
     for ttype, tvalue in tokens:
         unique_token_types.add(ttype)
-        if any(ttype in s for s in significant_tokens):
+        if ttype in Token.Error:
+            error_token_count += 1
+        elif any(ttype in s for s in significant_tokens):
             significant_token_count += 1
 
     # --- Language-Specific Heuristics ---
@@ -267,7 +272,12 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     # 3. Keyword Score
     keyword_score = 0
     content_lower = content.lower()
-    for keyword, weight in HIGH_VALUE_KEYWORDS.items():
+
+    # Get language-specific keywords and also check default keywords
+    lang_profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
+    keywords_to_check = {**LANGUAGE_PROFILES['default']['high_value_keywords'], **lang_profile['high_value_keywords']}
+
+    for keyword, weight in keywords_to_check.items():
         if keyword in content_lower:
             keyword_score += weight
 
@@ -280,12 +290,17 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     normalized_keyword_score = min(1.5, keyword_score / 10.0)
 
     # Final Score Combination
-    final_score = (
+    syntax_score = (
         (density_score * 0.4) +
         (diversity_score * 0.3) +
         (normalized_keyword_score * 0.3) +
         language_specific_bonus
     )
+
+    # 4. Error Penalty
+    error_ratio = error_token_count / total_tokens if total_tokens > 0 else 0
+    penalty_multiplier = max(0.2, 1.0 - (error_ratio * 2.5))
+    final_score = syntax_score * penalty_multiplier
 
     return min(1.0, final_score)
 
@@ -372,16 +387,20 @@ def calculate_comment_utility(content: str, language: str) -> float:
 # --- MAIN CALCULATION FUNCTION ---
 
 # SỬA LỖI: Thay đổi kiểu trả về từ (float, str) sang tuple[float, str]
-def calculate_priority(content: str, language: str, created_at: datetime.datetime) -> tuple[float, str]:
+def calculate_priority(content: str, language: str, created_at: datetime.datetime, is_verified: bool = False) -> tuple[float, str]:
     """
     Calculates the final priority score (0.1 to 1.0) using the advanced rule-based engine.
     
     Returns: (priority_score, assessment_string)
     """
+
+    if is_verified:
+        return 1.0, "Assessment: Overridden by Admin Manual Verification."
+
     lang = language.lower() if language else 'plaintext'
     
     # --- PHASE 1: PRE-CHECK (Spam/Trivial Rule) ---
-    if is_spam_or_trivial(content):
+    if is_spam_or_trivial(content, lang):
         return 0.1, "Assessment: Rejected (Trivial or Spam)."
     
     lang_base_score = get_base_priority(lang)
