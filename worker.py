@@ -327,7 +327,7 @@ def get_last_processed_timestamp():
         return None
 
 # --- Phase 2: Purge Deleted Snippets ---
-def purge_deleted_snippets():
+def purge_deleted_snippets(stats_counter: Counter):
     """
     Queries Firestore for 'deleted' snippets, backs them up to R2,
     and permanently deletes them from Firestore.
@@ -344,7 +344,7 @@ def purge_deleted_snippets():
     query_count = 0
     backup_failed_count = 0
     backup_skipped_count = 0
-    batch_limit = 400 
+    batch_limit = 400
     total_batches = 0
 
     try:
@@ -354,7 +354,7 @@ def purge_deleted_snippets():
         snippets_ref = db.collection('snippets')
         query = snippets_ref.where(filter=FieldFilter('visibility', '==', 'deleted'))
 
-        docs_stream = query.stream() 
+        docs_stream = query.stream()
 
         batch = db.batch()
         current_batch_size = 0
@@ -366,12 +366,11 @@ def purge_deleted_snippets():
             log_event("snippet_queued_for_purge", snippet_id=snippet_id, status="DEBUG")
 
             # --- R2 Recovery Backup ---
-            backup_success = False 
-            if s3_client and r2_bucket_name: 
+            if s3_client and r2_bucket_name:
                 try:
                     snippet_data = doc.to_dict()
                     recovery_json = json.dumps(snippet_data, default=str)
-                    
+
                     today_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
                     unique_filename = f"{today_str}_{uuid.uuid4()}.json"
                     prefix = r2_recovery_prefix if r2_recovery_prefix.endswith('/') else f"{r2_recovery_prefix}/"
@@ -380,26 +379,27 @@ def purge_deleted_snippets():
                     s3_client.put_object(
                         Bucket=r2_bucket_name,
                         Key=object_key,
-                        Body=recovery_json.encode('utf-8'), 
+                        Body=recovery_json.encode('utf-8'),
                         ContentType='application/json'
                     )
                     log_event("recovery_backup_success_r2", snippet_id=snippet_id, details={"key": object_key}, status="INFO")
                     logging.info(f"Successfully backed up snippet {snippet_id} to R2: {object_key}")
-                    backup_success = True
 
                 except ClientError as ce:
                     backup_failed_count += 1
+                    stats_counter['recovery_backup_failed_r2'] += 1
                     log_event("recovery_backup_failed_r2", details={"error": str(ce)}, status="ERROR", snippet_id=snippet_id)
                     logging.error(f"R2 ClientError backing up snippet {snippet_id}: {ce}")
                 except Exception as recovery_err:
                     backup_failed_count += 1
+                    stats_counter['recovery_backup_failed_r2'] += 1
                     log_event("recovery_backup_failed_r2", details={"error": str(recovery_err)}, status="ERROR", snippet_id=snippet_id)
                     logging.error(f"Failed to back up snippet {snippet_id} to R2: {recovery_err}", exc_info=True)
             else:
                 backup_skipped_count += 1
                 logging.debug(f"R2 client not configured. Skipping recovery backup for {snippet_id}.")
-                if query_count == 1: 
-                     log_event("recovery_backup_skipped_r2_config", status="WARN")
+                if query_count == 1:
+                    log_event("recovery_backup_skipped_r2_config", status="WARN")
             # --- End R2 Recovery Backup ---
 
             batch.delete(doc.reference)
@@ -413,7 +413,7 @@ def purge_deleted_snippets():
                 logging.info(f"Committed batch {total_batches}. Total purged so far: {purged_count}")
                 batch = db.batch()
                 current_batch_size = 0
-                time.sleep(0.5) 
+                time.sleep(0.5)
 
         if current_batch_size > 0:
             logging.info(f"Committing final purge batch of {current_batch_size} snippets...")
@@ -432,7 +432,7 @@ def purge_deleted_snippets():
             "backup_skipped_r2": backup_skipped_count,
             "duration_sec": purge_duration
         }, status="INFO" if backup_failed_count == 0 else "WARN")
-        
+
         return query_count, purged_count, backup_failed_count, backup_skipped_count
 
     except Exception as e:
@@ -448,26 +448,26 @@ def purge_deleted_snippets():
 
 def run_sync():
     """Main function to run Index and Purge phases. (Not an endpoint)"""
-    # Kiểm tra dependency
     if not db:
         error_msg = "Firestore client unavailable. Aborting sync."
         logging.error(error_msg)
         send_discord_notification(embeds=[{"title": "❌ Sync Aborted", "description": error_msg}], level="error")
-        sys.exit(1) 
+        sys.exit(1)
     if not os_client:
         error_msg = "OpenSearch client unavailable. Aborting sync."
         logging.error(error_msg)
         send_discord_notification(embeds=[{"title": "❌ Sync Aborted", "description": error_msg}], level="error")
-        sys.exit(1) 
+        sys.exit(1)
 
     overall_start_time = time.time()
     sync_results = {}
     purge_results = {}
+    stats_counter = Counter()
 
     # --- Phase 1: Indexing ---
     phase1_start_time = time.time()
-    global session_id 
-    session_id = None 
+    global session_id
+    session_id = None
     if not open_log_session(app_name="index_worker"):
         logging.warning("Proceeding with Indexing without D1 logging session.")
 
@@ -475,27 +475,29 @@ def run_sync():
     sync_type = "Incremental Index" if last_processed_at_dt else "Full Index"
     logging.info(f"Starting Phase 1: {sync_type}...")
     log_event("index_started", details={"type": sync_type, "since": last_processed_at_dt.isoformat() if last_processed_at_dt else "None"}, status="INFO")
-    if last_processed_at_dt: send_discord_notification(message=f"🚀 Starting {sync_type} since {last_processed_at_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}...")
-    else: send_discord_notification(message=f"🚀 Starting Full Index (no previous timestamp found)...")
+    if last_processed_at_dt:
+        send_discord_notification(message=f"🚀 Starting {sync_type} since {last_processed_at_dt.strftime('%Y-%m-%d %H:%M:%S UTC')}...")
+    else:
+        send_discord_notification(message=f"🚀 Starting Full Index (no previous timestamp found)...")
 
-    # Các biến đếm
     processed, indexed, index_failed, skipped_rules, expired = 0, 0, 0, 0, 0
-    rule_based_analyzed = 0 
-    actions = []; indexing_errors_details = []
-    phase1_successful = True 
+    rule_based_analyzed = 0
+    actions = []
+    indexing_errors_details = []
+    phase1_successful = True
 
     try:
         current_run_time = datetime.datetime.now(datetime.timezone.utc)
         snippets_ref = db.collection('snippets')
-        query = snippets_ref.where(filter=FieldFilter('visibility', '==', 'public')) 
+        query = snippets_ref.where(filter=FieldFilter('visibility', '==', 'public'))
 
         if last_processed_at_dt:
             query = query.where(filter=FieldFilter('updatedAt', '>', last_processed_at_dt))
             query = query.where(filter=FieldFilter('updatedAt', '<=', current_run_time))
             logging.info(f"Querying Firestore for public snippets updated in window: ({last_processed_at_dt.isoformat()}, {current_run_time.isoformat()}]")
         else:
-             query = query.where(filter=FieldFilter('updatedAt', '<=', current_run_time))
-             logging.info(f"Querying Firestore for ALL public snippets up to {current_run_time.isoformat()}...")
+            query = query.where(filter=FieldFilter('updatedAt', '<=', current_run_time))
+            logging.info(f"Querying Firestore for ALL public snippets up to {current_run_time.isoformat()}...")
 
         docs_stream = query.order_by('updatedAt', direction=firestore.Query.ASCENDING).stream()
 
@@ -506,34 +508,37 @@ def run_sync():
 
             snippet_updated_at = snippet_data.get('updatedAt')
             if isinstance(snippet_updated_at, datetime.datetime):
-                if snippet_updated_at.tzinfo is None: snippet_updated_at = snippet_updated_at.replace(tzinfo=datetime.timezone.utc)
-                if last_processed_at_dt and snippet_updated_at <= last_processed_at_dt: continue 
-                if snippet_updated_at > current_run_time: continue 
-            if snippet_data.get('visibility') != 'public': continue 
+                if snippet_updated_at.tzinfo is None:
+                    snippet_updated_at = snippet_updated_at.replace(tzinfo=datetime.timezone.utc)
+                if last_processed_at_dt and snippet_updated_at <= last_processed_at_dt:
+                    continue
+                if snippet_updated_at > current_run_time:
+                    continue
+            if snippet_data.get('visibility') != 'public':
+                continue
 
-            # --- Expiry Check ---
-            expires_at = snippet_data.get('expiresAt'); expiry_dt = None
+            expires_at = snippet_data.get('expiresAt')
             if expires_at:
                 try:
-                    if isinstance(expires_at, str): expiry_dt = datetime.datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                    elif isinstance(expires_at, datetime.datetime): expiry_dt = expires_at.replace(tzinfo=datetime.timezone.utc) if expires_at.tzinfo is None else expires_at
+                    expiry_dt = None
+                    if isinstance(expires_at, str):
+                        expiry_dt = datetime.datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                    elif isinstance(expires_at, datetime.datetime):
+                        expiry_dt = expires_at.replace(tzinfo=datetime.timezone.utc) if expires_at.tzinfo is None else expires_at
                     if expiry_dt and expiry_dt < current_run_time:
-                         expired += 1; log_event("snippet_expired_indexing", snippet_id=snippet_id, status="INFO");
-                         logging.info(f"Snippet {snippet_id} expired, skipping index.")
-                         continue
-                except Exception as e: log_event("expiry_parse_error_indexing", {"error": str(e)}, status="WARN", snippet_id=snippet_id)
+                        expired += 1
+                        log_event("snippet_expired_indexing", snippet_id=snippet_id, status="INFO")
+                        logging.info(f"Snippet {snippet_id} expired, skipping index.")
+                        continue
+                except Exception as e:
+                    stats_counter['expiry_parse_error_indexing'] += 1
+                    log_event("expiry_parse_error_indexing", {"error": str(e)}, status="WARN", snippet_id=snippet_id)
 
-            # --- Rule-based Analysis ---
-            ai_priority: float = 0.5 
-            ai_assessment: str = "Rule-based assessment failed: Missing required data."
-            analysis_source = "rule_error"
-            
             content_to_analyze = snippet_data.get('content', '')
             snippet_lang = snippet_data.get('language', 'plaintext')
             snippet_created_at = snippet_data.get('createdAt')
-            
+
             if snippet_created_at and isinstance(snippet_created_at, datetime.datetime):
-                # Sửa lỗi: Truyền is_verified vào hàm
                 priority_score, assessment_string = calculate_priority(
                     content=content_to_analyze,
                     language=snippet_lang,
@@ -544,140 +549,163 @@ def run_sync():
                 ai_assessment = assessment_string
                 analysis_source = "rule_based"
                 rule_based_analyzed += 1
-                
+
                 if ai_priority <= 0.1:
                     skipped_rules += 1
                     analysis_source = "rule_skip"
                     log_event("skipped_by_rule_indexing", snippet_id=snippet_id, details={"priority": ai_priority}, status="INFO")
             else:
-                # Dữ liệu thiếu createdAt
                 ai_priority = 0.1
                 ai_assessment = "CRITICAL ERROR: Missing createdAt field. Priority set to minimum."
                 analysis_source = "data_error"
+                stats_counter['missing_created_at_error'] += 1
                 log_event("missing_created_at_error", details={"priority": ai_priority}, status="ERROR", snippet_id=snippet_id)
-            
-            # --- Data Enrichment and Action Prep ---
-            enriched_data = snippet_data.copy(); 
-            enriched_data['processed_at'] = current_run_time.isoformat(); 
-            enriched_data['firestore_id'] = snippet_id; 
-            enriched_data['ai_priority'] = float(ai_priority); 
-            enriched_data['ai_assessment'] = ai_assessment; 
-            enriched_data['analysis_source'] = analysis_source
-            enriched_data['ai_is_flagged'] = False # Mặc định là False
-            
-            created_at = enriched_data.get('createdAt'); updated_at = enriched_data.get('updatedAt'); expires_at_val = enriched_data.get('expiresAt')
-            if isinstance(created_at, datetime.datetime): enriched_data['createdAt'] = created_at.isoformat()
-            if isinstance(updated_at, datetime.datetime): enriched_data['updatedAt'] = updated_at.isoformat()
-            if isinstance(expires_at_val, datetime.datetime): enriched_data['expiresAt'] = expires_at_val.isoformat()
-            elif expires_at_val is not None and not isinstance(expires_at_val, str):
-                 if 'expiresAt' in enriched_data: del enriched_data['expiresAt'] 
-            
-            for key, val in enriched_data.items():
-                if isinstance(val, datetime.datetime):
-                    enriched_data[key] = val.isoformat()
-                elif isinstance(val, firestore.Timestamp): # SỬ DỤNG firestore.Timestamp
-                     enriched_data[key] = val.to_datetime().isoformat()
 
-            action = { "_op_type": "index", "_index": opensearch_index, "_id": snippet_id, "_source": enriched_data }; actions.append(action)
+            updated_fields = {
+                'ai_priority': float(ai_priority),
+                'ai_assessment': ai_assessment,
+                'processed_at': current_run_time.isoformat(),
+                'analysis_source': analysis_source,
+            }
 
-        # --- Bulk Indexing ---
+            action = {
+                "_op_type": "update",
+                "_index": opensearch_index,
+                "_id": snippet_id,
+                "doc": updated_fields
+            }
+            actions.append(action)
+
         if actions:
             logging.info(f"Attempting to bulk index/update {len(actions)} snippets...")
             try:
                 success_count, errors = helpers.bulk(os_client, actions, raise_on_error=False, raise_on_exception=False, request_timeout=120)
-                indexed = success_count; index_failed = len(errors)
+                indexed = success_count
+                index_failed = len(errors)
                 logging.info(f"Bulk indexing completed. Success: {indexed}, Failed: {index_failed}")
                 if errors:
                     for i, error_info in enumerate(errors):
-                        item_details = error_info.get('index') or error_info.get('create') or {}
-                        doc_id = item_details.get('_id', 'N/A'); err_details_obj = item_details.get('error', {})
+                        item_details = error_info.get('update') or {}
+                        doc_id = item_details.get('_id', 'N/A')
+                        err_details_obj = item_details.get('error', {})
                         err_str = json.dumps(err_details_obj)[:500] if isinstance(err_details_obj, dict) else str(err_details_obj)[:500]
+                        stats_counter['indexing_error'] += 1
                         log_event("indexing_error", details={"error": err_str}, status="ERROR", snippet_id=doc_id)
-                        if i < 5: indexing_errors_details.append(f"ID:{doc_id} Err:{err_str[:200]}")
+                        if i < 5:
+                            indexing_errors_details.append(f"ID:{doc_id} Err:{err_str[:200]}")
                     logging.error(f"First {len(indexing_errors_details)} bulk errors: {'; '.join(indexing_errors_details)}")
-                    phase1_successful = False 
-            except os_exceptions.ConnectionTimeout as e: index_failed = len(actions); indexed = 0; error_msg = f"OS Bulk Timeout ({e})"; logging.error(error_msg); indexing_errors_details.append(error_msg); log_event("bulk_error_indexing", details={"error": error_msg}, status="ERROR"); phase1_successful = False
-            except os_exceptions.TransportError as e: index_failed = len(actions); indexed = 0; error_msg = f"OS Bulk TransportError ({e})"; logging.error(error_msg, exc_info=True); indexing_errors_details.append(error_msg[:200]); log_event("bulk_error_indexing", details={"error": error_msg[:500]}, status="ERROR"); phase1_successful = False
-            except Exception as e: index_failed = len(actions); indexed = 0; error_msg = f"OS Bulk Generic Error ({e})"; logging.error(error_msg, exc_info=True); indexing_errors_details.append(error_msg[:200]); log_event("bulk_error_indexing", details={"error": error_msg[:500]}, status="ERROR"); phase1_successful = False
+                    phase1_successful = False
+            except os_exceptions.ConnectionTimeout as e:
+                index_failed = len(actions)
+                indexed = 0
+                error_msg = f"OS Bulk Timeout ({e})"
+                logging.error(error_msg)
+                indexing_errors_details.append(error_msg)
+                stats_counter['bulk_error_indexing'] += 1
+                log_event("bulk_error_indexing", details={"error": error_msg}, status="ERROR")
+                phase1_successful = False
+            except os_exceptions.TransportError as e:
+                index_failed = len(actions)
+                indexed = 0
+                error_msg = f"OS Bulk TransportError ({e})"
+                logging.error(error_msg, exc_info=True)
+                indexing_errors_details.append(error_msg[:200])
+                stats_counter['bulk_error_indexing'] += 1
+                log_event("bulk_error_indexing", details={"error": error_msg[:500]}, status="ERROR")
+                phase1_successful = False
+            except Exception as e:
+                index_failed = len(actions)
+                indexed = 0
+                error_msg = f"OS Bulk Generic Error ({e})"
+                logging.error(error_msg, exc_info=True)
+                indexing_errors_details.append(error_msg[:200])
+                stats_counter['bulk_error_indexing'] += 1
+                log_event("bulk_error_indexing", details={"error": error_msg[:500]}, status="ERROR")
+                phase1_successful = False
         else:
-             logging.info("No new or updated public snippets found to index in Phase 1.")
+            logging.info("No new or updated public snippets found to index in Phase 1.")
 
         sync_results = {
             "phase": "Index", "type": sync_type, "processed": processed, "expired": expired,
-            "skipped_rules": skipped_rules, 
-            "rule_based_analyzed": rule_based_analyzed, 
+            "skipped_rules": skipped_rules,
+            "rule_based_analyzed": rule_based_analyzed,
             "indexed": indexed, "index_failed": index_failed,
             "duration_sec": round(time.time() - phase1_start_time, 2),
-            "errors": indexing_errors_details 
+            "errors": indexing_errors_details,
+            "stats": stats_counter
         }
-        log_event("index_finished", details={k: v for k, v in sync_results.items() if k != 'errors' and k != 'phase'}, status="INFO" if phase1_successful else "ERROR")
+        log_event("index_finished", details={k: v for k, v in sync_results.items() if k not in ['errors', 'phase', 'stats']}, status="INFO" if phase1_successful else "ERROR")
 
     except Exception as e:
         phase1_successful = False
         error_message = f"Critical error during Index Phase: {e}"
         logging.error(error_message, exc_info=True)
         log_event("critical_index_error", details={"error": str(e)[:500], "type": sync_type}, status="ERROR")
-        sync_results = {"phase": "Index", "type": sync_type, "status": "critical_error", "error": str(e)[:500], "duration_sec": round(time.time() - phase1_start_time, 2)}
+        sync_results = {"phase": "Index", "type": sync_type, "status": "critical_error", "error": str(e)[:500], "duration_sec": round(time.time() - phase1_start_time, 2), "stats": stats_counter}
         send_discord_notification(embeds=[{"title": f"❌ {sync_type} Failed Critically", "description": error_message[:1000]}], level="error")
-        close_log_session() 
-        sys.exit(1) 
+        close_log_session()
+        sys.exit(1)
     finally:
         close_log_session()
 
     # --- Phase 2: Purge ---
-    phase2_successful = False 
+    phase2_successful = False
     purged_found, purged_deleted, purged_backup_failed, purged_backup_skipped = 0, 0, 0, 0
     try:
-        purged_found, purged_deleted, purged_backup_failed, purged_backup_skipped = purge_deleted_snippets()
+        purged_found, purged_deleted, purged_backup_failed, purged_backup_skipped = purge_deleted_snippets(stats_counter)
         purge_results = {
             "phase": "Purge",
             "found_deleted": purged_found,
             "purged": purged_deleted,
             "backup_failed_r2": purged_backup_failed,
-            # SỬA LỖI: Thay 'purged_skipped_count' bằng 'purged_backup_skipped'
             "backup_skipped_r2": purged_backup_skipped,
-            "duration_sec": round(time.time() - (phase1_start_time + sync_results.get("duration_sec", 0)), 2) 
+            "duration_sec": round(time.time() - (phase1_start_time + sync_results.get("duration_sec", 0)), 2)
         }
-        phase2_successful = True 
+        phase2_successful = True
 
     except Exception as e:
-         error_message = f"Critical error initiating Purge Phase: {e}"
-         logging.error(error_message, exc_info=True)
-         purge_results = {"phase": "Purge", "status": "critical_error", "error": str(e)[:500]}
-         send_discord_notification(embeds=[{"title": f"❌ Purge Phase Failed Critically", "description": error_message[:1000]}], level="error")
-         
+        error_message = f"Critical error initiating Purge Phase: {e}"
+        logging.error(error_message, exc_info=True)
+        purge_results = {"phase": "Purge", "status": "critical_error", "error": str(e)[:500]}
+        send_discord_notification(embeds=[{"title": f"❌ Purge Phase Failed Critically", "description": error_message[:1000]}], level="error")
+
     # --- Final Summary ---
     overall_duration = round(time.time() - overall_start_time, 2)
     final_status = "success" if phase1_successful and phase2_successful else "partial_failure" if phase1_successful or phase2_successful else "failed"
 
     summary_title_status = '✅' if final_status == 'success' else '⚠️'
     if purged_backup_failed > 0 and final_status == 'success':
-        summary_title_status = '⚠️' 
-        final_status = 'partial_failure' 
+        summary_title_status = '⚠️'
+        final_status = 'partial_failure'
     
     summary_title = f"{summary_title_status} Sync & Purge Completed ({overall_duration}s)"
     summary_desc_parts = [f"**Index Phase ({sync_results.get('duration_sec', 'N/A')}s):**"]
     summary_desc_parts.append(f"  Type: {sync_results.get('type', 'N/A')}")
     summary_desc_parts.append(f"  Checked: {sync_results.get('processed', 'N/A')} | Expired: {sync_results.get('expired', 'N/A')} | Skipped (Rules): {sync_results.get('skipped_rules', 'N/A')}")
-    # Cập nhật dòng summary (chỉ còn Rule-based)
     summary_desc_parts.append(f"  Rule-based Analyzed: {sync_results.get('rule_based_analyzed', 'N/A')}")
     summary_desc_parts.append(f"  Indexed: {sync_results.get('indexed', 'N/A')} | Index Fail: {sync_results.get('index_failed', 'N/A')}")
-    if sync_results.get('status') == 'critical_error': summary_desc_parts.append(f"  **Status: CRITICAL ERROR**")
+    if sync_results.get('status') == 'critical_error':
+        summary_desc_parts.append(f"  **Status: CRITICAL ERROR**")
 
     summary_desc_parts.append(f"\n**Purge Phase ({purge_results.get('duration_sec', 'N/A')}s):**")
     if purge_results.get('status') == 'critical_error':
-         summary_desc_parts.append(f"  **Status: CRITICAL ERROR**")
+        summary_desc_parts.append(f"  **Status: CRITICAL ERROR**")
     else:
         summary_desc_parts.append(f"  Found Deleted: {purge_results.get('found_deleted', 'N/A')} | Purged: {purge_results.get('purged', 'N/A')}")
         summary_desc_parts.append(f"  R2 Backup Fail: {purge_results.get('backup_failed_r2', 'N/A')} | R2 Backup Skip: {purge_results.get('backup_skipped_r2', 'N/A')}")
 
-
     summary_description = "\n".join(summary_desc_parts)
-    summary_embed = {"title": summary_title, "description": summary_description}
+    summary_embed = {"title": summary_title, "description": summary_description, "fields": []}
 
     index_errors_sample = sync_results.get('errors')
     if index_errors_sample:
-        summary_embed["fields"] = [{"name": "Indexing Errors (sample)", "value": "\n".join(index_errors_sample)}]
+        summary_embed["fields"].append({"name": "Indexing Errors (sample)", "value": "\n".join(index_errors_sample)})
+
+    if stats_counter:
+        top_3_errors = stats_counter.most_common(3)
+        error_summary_str = "\n".join([f"- {event}: {count} lần" for event, count in top_3_errors])
+        if error_summary_str:
+            summary_embed["fields"].append({"name": "Top 3 Warnings/Errors", "value": error_summary_str})
 
     discord_level = "success" if final_status == "success" else ("error" if final_status == "failed" else "warning")
     send_discord_notification(embeds=[summary_embed], level=discord_level)
