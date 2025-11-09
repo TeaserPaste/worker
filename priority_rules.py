@@ -1,3 +1,4 @@
+import logging
 import re
 import datetime
 from collections import Counter
@@ -249,7 +250,12 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     try:
         lexer = get_lexer_by_name(language, stripall=False)
     except pygments.util.ClassNotFound:
-        lexer = get_lexer_by_name('plaintext', stripall=False)
+        # Lỗi nghiêm trọng: nếu 'plaintext' cũng không tìm thấy, fallback an toàn
+        try:
+            lexer = get_lexer_by_name('plaintext', stripall=False)
+        except pygments.util.ClassNotFound:
+            logging.warning(f"Pygments lexer for '{language}' and even for 'plaintext' not found. Returning neutral score for syntax.")
+            return 0.5
 
     tokens = list(pygments.lex(content, lexer))
     if not tokens:
@@ -355,7 +361,11 @@ def calculate_comment_utility(content: str, language: str) -> float:
     try:
         lexer = get_lexer_by_name(language, stripall=False)
     except pygments.util.ClassNotFound:
-        lexer = get_lexer_by_name('plaintext', stripall=False)
+        try:
+            lexer = get_lexer_by_name('plaintext', stripall=False)
+        except pygments.util.ClassNotFound:
+            logging.warning(f"Pygments lexer for '{language}' and 'plaintext' not found. Returning neutral score for utility.")
+            return 0.5
 
     tokens = list(pygments.lex(content, lexer))
     lines = content.splitlines()
