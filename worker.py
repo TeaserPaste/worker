@@ -568,11 +568,28 @@ def run_sync():
                 'analysis_source': analysis_source,
             }
 
+            # --- SỬA LỖI: Chuẩn bị doc cho upsert ---
+            # Tạo một bản sao của dữ liệu gốc từ Firestore để không làm thay đổi nó
+            upsert_doc = snippet_data.copy()
+            # Cập nhật (hoặc thêm) các trường đã tính toán vào bản sao này
+            upsert_doc.update(updated_fields)
+
+            # Đảm bảo tất cả các trường datetime được chuyển đổi thành chuỗi ISO 8601
+            # mà OpenSearch có thể hiểu được.
+            for key, value in upsert_doc.items():
+                if isinstance(value, datetime.datetime):
+                    # Gán múi giờ UTC nếu datetime object là "naive"
+                    if value.tzinfo is None:
+                        upsert_doc[key] = value.replace(tzinfo=datetime.timezone.utc).isoformat()
+                    else:
+                        upsert_doc[key] = value.isoformat()
+
             action = {
                 "_op_type": "update",
                 "_index": opensearch_index,
                 "_id": snippet_id,
-                "doc": updated_fields
+                "doc": updated_fields,
+                "upsert": upsert_doc  # Nếu doc không tồn tại, chèn 'upsert_doc'
             }
             actions.append(action)
 
