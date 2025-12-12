@@ -369,21 +369,26 @@ def purge_deleted_snippets(stats_counter: Counter):
             if s3_client and r2_bucket_name:
                 try:
                     snippet_data = doc.to_dict()
-                    recovery_json = json.dumps(snippet_data, default=str)
 
-                    today_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
-                    unique_filename = f"{today_str}_{uuid.uuid4()}.json"
-                    prefix = r2_recovery_prefix if r2_recovery_prefix.endswith('/') else f"{r2_recovery_prefix}/"
-                    object_key = f"{prefix}{snippet_id}/{unique_filename}"
+                    # Check allowBackup (default to True if missing)
+                    if snippet_data.get('allowBackup') is False:
+                        logging.info(f"Skipping R2 backup for snippet {snippet_id} (allowBackup=False).")
+                    else:
+                        recovery_json = json.dumps(snippet_data, default=str)
 
-                    s3_client.put_object(
-                        Bucket=r2_bucket_name,
-                        Key=object_key,
-                        Body=recovery_json.encode('utf-8'),
-                        ContentType='application/json'
-                    )
-                    log_event("recovery_backup_success_r2", snippet_id=snippet_id, details={"key": object_key}, status="INFO")
-                    logging.info(f"Successfully backed up snippet {snippet_id} to R2: {object_key}")
+                        today_str = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')
+                        unique_filename = f"{today_str}_{uuid.uuid4()}.json"
+                        prefix = r2_recovery_prefix if r2_recovery_prefix.endswith('/') else f"{r2_recovery_prefix}/"
+                        object_key = f"{prefix}{snippet_id}/{unique_filename}"
+
+                        s3_client.put_object(
+                            Bucket=r2_bucket_name,
+                            Key=object_key,
+                            Body=recovery_json.encode('utf-8'),
+                            ContentType='application/json'
+                        )
+                        log_event("recovery_backup_success_r2", snippet_id=snippet_id, details={"key": object_key}, status="INFO")
+                        logging.info(f"Successfully backed up snippet {snippet_id} to R2: {object_key}")
 
                 except ClientError as ce:
                     backup_failed_count += 1
