@@ -5,15 +5,9 @@ import json
 import re
 import sys
 from collections import Counter
-# SỬA LỖI IMPORT: Sửa lại import từ priority_rules để lấy đúng đối tượng
-# Giả sử hàm chính trong priority_rules là 'calculate_priority'
-# và nó trả về một dictionary.
 from priority_rules import calculate_priority
-# SỬA LỖI IMPORT: loại bỏ Timestamp khỏi google.cloud.firestore_v1.
-# Chúng ta sẽ sử dụng firebase_admin.firestore.Timestamp thay thế khi cần.
 import firebase_admin
 from firebase_admin import credentials, firestore
-# Import WriteBatch từ google.cloud.firestore_v1 vì nó vẫn cần thiết cho firestore.client().batch()
 from google.cloud.firestore_v1.base_query import FieldFilter
 from google.cloud.firestore_v1 import WriteBatch 
 from opensearchpy import OpenSearch, helpers, exceptions as os_exceptions 
@@ -26,13 +20,11 @@ from botocore.client import Config
 from botocore.exceptions import NoCredentialsError, PartialCredentialsError, ClientError
 
 # --- Cấu hình logging ---
-# Fix lỗi: Nếu LOG_LEVEL rỗng (cronjob không set), ta phải gán giá trị mặc định 'INFO'.
 log_level_env = os.environ.get('LOG_LEVEL', 'INFO').upper()
 log_level = log_level_env if log_level_env else 'INFO'
 
 # Set logging level cho module priority_rules
 logging.getLogger("priority_rules").setLevel(logging.DEBUG if log_level == 'DEBUG' else logging.INFO)
-# Giữ nguyên các cấu hình logging khác
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 logging.getLogger("opensearch").setLevel(logging.WARNING)
@@ -47,7 +39,6 @@ load_dotenv()
 db = None
 try:
     if not firebase_admin._apps:
-        # Thay thế \n thành ký tự xuống dòng thực tế
         private_key = os.getenv("FIREBASE_PRIVATE_KEY", "").replace('\\n', '\n')
         project_id = os.getenv("FIREBASE_PROJECT_ID")
         client_email = os.getenv("FIREBASE_CLIENT_EMAIL")
@@ -86,7 +77,6 @@ opensearch_host = os.getenv("OPENSEARCH_HOST")
 opensearch_port = int(os.getenv("OPENSEARCH_PORT", 9200))
 opensearch_user = os.getenv("OPENSEARCH_USER")
 opensearch_password = os.getenv("OPENSEARCH_PASSWORD")
-# Mặc định an toàn là https
 opensearch_scheme = os.getenv("OPENSEARCH_SCHEME", "https") 
 opensearch_index = os.getenv("OPENSEARCH_INDEX", "snippets")
 
@@ -573,10 +563,7 @@ def run_sync():
                 'analysis_source': analysis_source,
             }
 
-            # --- SỬA LỖI: Chuẩn bị doc cho upsert ---
-            # Tạo một bản sao của dữ liệu gốc từ Firestore để không làm thay đổi nó
             upsert_doc = snippet_data.copy()
-            # Cập nhật (hoặc thêm) các trường đã tính toán vào bản sao này
             upsert_doc.update(updated_fields)
 
             # Đảm bảo tất cả các trường datetime được chuyển đổi thành chuỗi ISO 8601
@@ -750,8 +737,6 @@ if __name__ == "__main__":
         logging.info("Worker run completed successfully.")
         sys.exit(0) 
     except SystemExit as e:
-        # Sửa lỗi logic: Ghi log warning và raise lại lỗi SystemExit
-        # để workflow biết script đã thoát với mã lỗi (nếu e.code != 0)
         logging.warning(f"Worker process exited with status {e.code}.")
         raise 
     except Exception as e:
