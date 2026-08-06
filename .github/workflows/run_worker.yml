@@ -40,18 +40,18 @@ env:
 jobs:
   run-worker-sync:
     runs-on: ubuntu-latest
-    environment: worker # <--- ĐÃ THÊM MÔI TRƯỜNG 'worker'
+    environment: worker
     
     steps:
       - name: ⬇️ Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12' 
       
-      # --- Caching venv (BƯỚC MỚI) ---
+      # --- Caching venv ---
       - name: ⚙️ Cache Python dependencies
         uses: actions/cache@v4.3.0
         id: cache-venv
@@ -73,7 +73,6 @@ jobs:
       
       # --- Kích hoạt Venv & Thực thi Worker ---
       - name: 🚀 Run Worker Script
-        # Thêm biến môi trường LOG_LEVEL, ưu tiên giá trị nhập thủ công (inputs)
         env:
           LOG_LEVEL: ${{ github.event.inputs.log_level || env.LOG_LEVEL_DEFAULT }}
         run: |
