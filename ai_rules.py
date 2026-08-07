@@ -30,6 +30,7 @@ def check_content_safety(content: str, openrouter_key: str) -> tuple[bool, str]:
             "temperature": 0.0,
             "max_tokens": 100,
         }
+        logging.debug(f"Calling Nemotron API with length: {len(safety_check_text)}")
         response = http_session.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -39,6 +40,7 @@ def check_content_safety(content: str, openrouter_key: str) -> tuple[bool, str]:
             json=payload,
             timeout=AI_CONFIG["NEMOTRON_TIMEOUT"],
         )
+        logging.debug(f"Nemotron status: {response.status_code}, response: {response.text}")
         if response.status_code == 200:
             resp_json = response.json()
             choices = resp_json.get("choices", [])
@@ -70,6 +72,7 @@ def get_ai_priority_rating(content: str, language: str, openrouter_key: str) -> 
             "temperature": 0.1,
             "max_tokens": 150,
         }
+        logging.debug(f"Calling Cohere API with length: {len(prompt_content)}")
         response = http_session.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -79,6 +82,7 @@ def get_ai_priority_rating(content: str, language: str, openrouter_key: str) -> 
             json=payload,
             timeout=AI_CONFIG["COHERE_TIMEOUT"],
         )
+        logging.debug(f"Cohere status: {response.status_code}, response: {response.text}")
         if response.status_code == 200:
             resp_json = response.json()
             choices = resp_json.get("choices", [])
@@ -94,6 +98,9 @@ def get_ai_priority_rating(content: str, language: str, openrouter_key: str) -> 
                         return score, f"Priority={score:.3f} | Details: {details}"
                     except Exception as parse_err:
                         logging.warning(f"Failed to parse JSON from Cohere model: {parse_err}. Content: {resp_text}")
+                        logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
+                else:
+                    logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
         else:
             logging.warning(f"Cohere API returned status {response.status_code}: {response.text}")
     except Exception as e:
@@ -118,6 +125,7 @@ def get_non_programming_priority_rating(content: str, language: str, openrouter_
             "temperature": 0.1,
             "max_tokens": 150,
         }
+        logging.debug(f"Calling Ling API with length: {len(prompt_content)}")
         response = http_session.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
@@ -127,6 +135,7 @@ def get_non_programming_priority_rating(content: str, language: str, openrouter_
             json=payload,
             timeout=AI_CONFIG["LING_TIMEOUT"],
         )
+        logging.debug(f"Ling status: {response.status_code}, response: {response.text}")
         if response.status_code == 200:
             resp_json = response.json()
             choices = resp_json.get("choices", [])
@@ -142,6 +151,9 @@ def get_non_programming_priority_rating(content: str, language: str, openrouter_
                         return score, f"Priority={score:.3f} | Details: {details}"
                     except Exception as parse_err:
                         logging.warning(f"Failed to parse JSON from Ling model: {parse_err}. Content: {resp_text}")
+                        logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
+                else:
+                    logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
         else:
             logging.warning(f"Ling API returned status {response.status_code}: {response.text}")
     except Exception as e:

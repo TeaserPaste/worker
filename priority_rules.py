@@ -177,6 +177,8 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
 
     Returns: (priority_score, assessment_string)
     """
+    logging.debug(f"calculate_priority input -> lang: {language}, len: {len(content) if content is not None else 0}, is_verified: {is_verified}")
+
     # 1. Admin Verification Overrides
     if is_verified:
         return 1.0, "Assessment: Overridden by Admin Manual Verification."
@@ -186,27 +188,33 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     # 2. Too Short check (< 15 characters)
     stripped_content = content.strip() if content else ""
     if len(stripped_content) < 15:
+        logging.debug("Rejected: Content too short")
         return 0.1, "Assessment: Rejected (Too short - less than 15 characters)."
 
     # 3. Too Long check (1000+ lines)
     if len(content.splitlines()) >= 1000:
+        logging.debug("Rejected: Too long (1000+ lines)")
         return 0.1, "Assessment: Rejected (Too long - 1000+ lines)."
 
     # 4. Too Long check (50000+ characters)
     if len(content) >= 50000:
+        logging.debug("Rejected: Too long (50000+ characters)")
         return 0.1, "Assessment: Rejected (Too long - 50000+ characters)."
 
     # 5. Lock files & default configs check
     if is_lock_file_or_default_config(content, lang):
+        logging.debug("Rejected: Lock file or default framework configuration file")
         return 0.1, "Assessment: Rejected (Lock file or default framework configuration file)."
 
     # 6. Likely spam checks (Reusing spam regex checking helper)
     if has_spam_patterns(content):
+        logging.debug("Rejected: Spam detected")
         return 0.1, "Assessment: Rejected (Spam detected)."
 
     # 7. Sensitive public UGC / PII checks
     # Local pattern pre-check
     if has_pii(content):
+        logging.debug("Rejected: Sensitive information/PII detected via local checks")
         return 0.1, "Assessment: Rejected (Sensitive information detected via local checks)."
 
     # External Nemotron safety check
@@ -214,10 +222,14 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     if openrouter_key:
         is_safe, safety_assessment = check_content_safety(content, openrouter_key)
         if not is_safe:
+            logging.debug("Rejected: Content safety check failed (Nemotron)")
             return 0.1, safety_assessment
 
     # 8. Check if non-programming language to evaluate with inclusionai/ling-3.0-tiny:free
-    if lang in NON_PROGRAMMING_LANGS:
+    routing_is_non_programming = lang in NON_PROGRAMMING_LANGS
+    logging.debug(f"Routing to AI rating. Is non-programming: {routing_is_non_programming}")
+
+    if routing_is_non_programming:
         if openrouter_key:
             ai_score, ai_assessment = get_non_programming_priority_rating(content, lang, openrouter_key)
             if ai_score is not None:
