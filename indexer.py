@@ -70,21 +70,70 @@ def run_indexing(stats_counter: Counter, last_processed_at_dt, current_run_time,
             query = query.where(filter=FieldFilter('updatedAt', '<=', current_run_time))
             logging.info(f"Querying Firestore for ALL public snippets up to {current_run_time.isoformat()}...")
 
-        docs_stream = query.order_by('updatedAt', direction=firestore_query_asc()).stream()
+        def stream_snippets():
+            # 1. Fetch pending snippets from OpenSearch first
+            pending_ids = []
+            if os_client:
+                try:
+                    search_query = {
+                        "size": 1000,
+                        "query": {
+                            "match": {
+                                "ai_status": "pending"
+                            }
+                        },
+                        "_source": False
+                    }
+                    res = os_client.search(index=opensearch_index, body=search_query, request_timeout=60)
+                    hits = res.get('hits', {}).get('hits', [])
+                    pending_ids = [hit['_id'] for hit in hits]
+                    if pending_ids:
+                        logging.info(f"Found {len(pending_ids)} pending snippets in OpenSearch for AI retry.")
+                except os_exceptions.NotFoundError:
+                    logging.info(f"OpenSearch index '{opensearch_index}' not found when searching for pending snippets.")
+                except Exception as e:
+                    logging.error(f"Error querying pending snippets from OpenSearch: {e}", exc_info=True)
 
-        for doc in docs_stream:
+            processed_ids = set()
+
+            # 2. Stream standard snippets
+            try:
+                docs_stream = query.order_by('updatedAt', direction=firestore_query_asc()).stream()
+                for doc in docs_stream:
+                    sid = doc.id
+                    processed_ids.add(sid)
+                    yield sid, doc.to_dict(), False
+            except Exception as e:
+                logging.error(f"Error streaming from Firestore: {e}", exc_info=True)
+
+            # 3. Stream pending snippets that weren't in standard stream
+            remaining_pending_ids = [pid for pid in pending_ids if pid not in processed_ids]
+            if remaining_pending_ids:
+                logging.info(f"Processing {len(remaining_pending_ids)} remaining pending snippets from queue...")
+                for pid in remaining_pending_ids:
+                    try:
+                        doc_ref = snippets_ref.document(pid)
+                        doc_snap = doc_ref.get()
+                        if doc_snap.exists:
+                            snippet_data = doc_snap.to_dict()
+                            if snippet_data.get('visibility') == 'public':
+                                processed_ids.add(pid)
+                                yield pid, snippet_data, True
+                    except Exception as e:
+                        logging.error(f"Error fetching pending snippet {pid} from Firestore: {e}", exc_info=True)
+
+        for snippet_id, snippet_data, is_pending_retry in stream_snippets():
             processed += 1
-            snippet_id = doc.id
-            snippet_data = doc.to_dict()
 
             snippet_updated_at = snippet_data.get('updatedAt')
             if isinstance(snippet_updated_at, datetime.datetime):
                 if snippet_updated_at.tzinfo is None:
                     snippet_updated_at = snippet_updated_at.replace(tzinfo=datetime.timezone.utc)
-                if last_processed_at_dt and snippet_updated_at <= last_processed_at_dt:
-                    continue
-                if snippet_updated_at > current_run_time:
-                    continue
+                if not is_pending_retry:
+                    if last_processed_at_dt and snippet_updated_at <= last_processed_at_dt:
+                        continue
+                    if snippet_updated_at > current_run_time:
+                        continue
             if snippet_data.get('visibility') != 'public':
                 continue
 
@@ -110,7 +159,7 @@ def run_indexing(stats_counter: Counter, last_processed_at_dt, current_run_time,
             snippet_created_at = snippet_data.get('createdAt')
 
             if snippet_created_at and isinstance(snippet_created_at, datetime.datetime):
-                priority_score, assessment_string = calculate_priority(
+                priority_score, assessment_string, ai_status = calculate_priority(
                     content=content_to_analyze,
                     language=snippet_lang,
                     created_at=snippet_created_at,
@@ -131,12 +180,14 @@ def run_indexing(stats_counter: Counter, last_processed_at_dt, current_run_time,
                 analysis_source = "data_error"
                 stats_counter['missing_created_at_error'] += 1
                 log_event("missing_created_at_error", details={"priority": ai_priority}, status="ERROR", snippet_id=snippet_id)
+                ai_status = None
 
             updated_fields = {
                 'ai_priority': float(ai_priority),
                 'ai_assessment': ai_assessment,
                 'processed_at': current_run_time.isoformat(),
                 'analysis_source': analysis_source,
+                'ai_status': ai_status,
             }
 
             upsert_doc = snippet_data.copy()

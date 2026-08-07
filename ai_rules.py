@@ -4,6 +4,11 @@ import logging
 import re
 import requests
 
+class OpenRouter429Error(Exception):
+    """Raised when the OpenRouter API returns a 429 status code (Rate Limit)."""
+    pass
+
+
 # --- HTTP Connection Reuse Session ---
 http_session = requests.Session()
 
@@ -48,8 +53,12 @@ def check_content_safety(content: str, openrouter_key: str) -> tuple[bool, str]:
                 resp_text = choices[0].get("message", {}).get("content", "")
                 if "user safety: unsafe" in resp_text.lower():
                     return False, "Assessment: Rejected (Sensitive information or unsafe content flagged by AI)."
+        elif response.status_code == 429:
+            raise OpenRouter429Error("Nemotron API rate limit exceeded (429)")
         else:
             logging.warning(f"Nemotron API returned status {response.status_code}: {response.text}")
+    except OpenRouter429Error:
+        raise
     except Exception as e:
         logging.warning(f"Failed to check content safety with Nemotron: {e}")
 
@@ -101,8 +110,12 @@ def get_ai_priority_rating(content: str, language: str, openrouter_key: str) -> 
                         logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
                 else:
                     logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
+        elif response.status_code == 429:
+            raise OpenRouter429Error("Cohere API rate limit exceeded (429)")
         else:
             logging.warning(f"Cohere API returned status {response.status_code}: {response.text}")
+    except OpenRouter429Error:
+        raise
     except Exception as e:
         logging.warning(f"Failed to get priority rating from Cohere: {e}")
 
@@ -154,8 +167,12 @@ def get_non_programming_priority_rating(content: str, language: str, openrouter_
                         logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
                 else:
                     logging.debug(f"Failed to parse LLM JSON. Raw output: {resp_text}")
+        elif response.status_code == 429:
+            raise OpenRouter429Error("Ling API rate limit exceeded (429)")
         else:
             logging.warning(f"Ling API returned status {response.status_code}: {response.text}")
+    except OpenRouter429Error:
+        raise
     except Exception as e:
         logging.warning(f"Failed to get priority rating from Ling: {e}")
 
