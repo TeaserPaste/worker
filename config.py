@@ -120,3 +120,8 @@ else:
 # --- Configure D1 Logging API ---
 D1_LOG_API_URL = os.getenv("D1_LOG_API_URL")
 
+# --- OpenRouter Configuration ---
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+if not OPENROUTER_API_KEY:
+    logging.warning("OPENROUTER_API_KEY is missing. AI priority scoring will be disabled and fall back to rule-based.")
+

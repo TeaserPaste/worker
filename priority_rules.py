@@ -7,6 +7,7 @@ import re
 
 # Import helper checks from AI rules
 from ai_rules import check_content_safety, get_ai_priority_rating, get_non_programming_priority_rating
+from config import OPENROUTER_API_KEY
 
 # --- Load Config ---
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
@@ -218,7 +219,7 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
         return 0.1, "Assessment: Rejected (Sensitive information detected via local checks)."
 
     # External Nemotron safety check
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    openrouter_key = OPENROUTER_API_KEY
     if openrouter_key:
         is_safe, safety_assessment = check_content_safety(content, openrouter_key)
         if not is_safe:
