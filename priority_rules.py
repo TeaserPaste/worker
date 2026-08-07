@@ -10,6 +10,9 @@ import pygments
 from pygments.lexers import get_lexer_by_name
 from pygments.token import Token, String, Comment
 
+# --- HTTP Connection Reuse Session ---
+http_session = requests.Session()
+
 # --- Weight and Threshold Configurations ---
 # Thresholds and Optimal Values
 THRESHOLDS = {
@@ -248,22 +251,22 @@ def calculate_age_decay(created_at: datetime.datetime, language: str) -> float:
     return max(0.2, decay_score)
 
 
-def analyze_structural_complexity(content: str, language: str) -> float:
+def analyze_structural_complexity(content: str, language: str, tokens: list = None) -> float:
     """
     Analyzes code complexity using Pygments for tokenization.
     Scores based on token diversity, density of significant tokens, and language-specific heuristics.
     """
-    try:
-        lexer = get_lexer_by_name(language, stripall=False)
-    except pygments.util.ClassNotFound:
-        # Critical error: if 'plaintext' is also not found, safe fallback
+    if tokens is None:
         try:
-            lexer = get_lexer_by_name('plaintext', stripall=False)
+            lexer = get_lexer_by_name(language, stripall=False)
         except pygments.util.ClassNotFound:
-            logging.warning(f"Pygments lexer for '{language}' and even for 'plaintext' not found. Returning neutral score for syntax.")
-            return 0.5
+            try:
+                lexer = get_lexer_by_name('plaintext', stripall=False)
+            except pygments.util.ClassNotFound:
+                logging.warning(f"Pygments lexer for '{language}' and even for 'plaintext' not found. Returning neutral score for syntax.")
+                return 0.5
+        tokens = list(pygments.lex(content, lexer))
 
-    tokens = list(pygments.lex(content, lexer))
     if not tokens:
         return 0.0
 
@@ -360,21 +363,22 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     return min(1.0, final_score)
 
 
-def calculate_comment_utility(content: str, language: str) -> float:
+def calculate_comment_utility(content: str, language: str, tokens: list = None) -> float:
     """
     Calculates utility score based on comment quality, readability, and structure.
     Uses Pygments for accurate comment and docstring detection.
     """
-    try:
-        lexer = get_lexer_by_name(language, stripall=False)
-    except pygments.util.ClassNotFound:
+    if tokens is None:
         try:
-            lexer = get_lexer_by_name('plaintext', stripall=False)
+            lexer = get_lexer_by_name(language, stripall=False)
         except pygments.util.ClassNotFound:
-            logging.warning(f"Pygments lexer for '{language}' and 'plaintext' not found. Returning neutral score for utility.")
-            return 0.5
+            try:
+                lexer = get_lexer_by_name('plaintext', stripall=False)
+            except pygments.util.ClassNotFound:
+                logging.warning(f"Pygments lexer for '{language}' and 'plaintext' not found. Returning neutral score for utility.")
+                return 0.5
+        tokens = list(pygments.lex(content, lexer))
 
-    tokens = list(pygments.lex(content, lexer))
     lines = content.splitlines()
 
     if not tokens or not lines:
@@ -475,11 +479,25 @@ def calculate_priority_rule_based(content: str, language: str, created_at: datet
     # 2. Age Decay Score
     age_score = calculate_age_decay(created_at, lang)
 
+    # Pygments tokenization share optimization
+    try:
+        lexer = get_lexer_by_name(lang, stripall=False)
+    except pygments.util.ClassNotFound:
+        try:
+            lexer = get_lexer_by_name('plaintext', stripall=False)
+        except pygments.util.ClassNotFound:
+            lexer = None
+
+    if lexer:
+        shared_tokens = list(pygments.lex(content, lexer))
+    else:
+        shared_tokens = []
+
     # 3. Structural Complexity Score (Code-aware analysis)
-    syntax_score = analyze_structural_complexity(content, lang)
+    syntax_score = analyze_structural_complexity(content, lang, tokens=shared_tokens)
 
     # 4. Comment & Readability Utility Score
-    utility_score = calculate_comment_utility(content, lang)
+    utility_score = calculate_comment_utility(content, lang, tokens=shared_tokens)
 
     # --- PHASE 3: FINAL CALCULATION ---
     lang_profile = LANGUAGE_PROFILES.get(lang, LANGUAGE_PROFILES['default'])
@@ -543,12 +561,8 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     if lang in NON_PROGRAMMING_LANGS:
         return 0.1, "Assessment: Rejected (Non-programming language)."
 
-    # 6. Likely spam checks
-    SPAM_PATTERNS = [
-        re.compile(r'buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra', re.IGNORECASE),
-        re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE)
-    ]
-    if any(pattern.search(content) for pattern in SPAM_PATTERNS):
+    # 6. Likely spam checks (Reusing SPAM_REGEX_BLACKLIST to avoid re-compilation overhead)
+    if any(pattern.search(content) for pattern in SPAM_REGEX_BLACKLIST):
         return 0.1, "Assessment: Rejected (Spam detected)."
 
     # 7. Sensitive public UGC / PII checks
@@ -576,7 +590,7 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
                 "temperature": 0.0,
                 "max_tokens": 100
             }
-            response = requests.post(
+            response = http_session.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {openrouter_key}",
@@ -621,7 +635,7 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
                 "temperature": 0.1,
                 "max_tokens": 150
             }
-            response = requests.post(
+            response = http_session.post(
                 "https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {openrouter_key}",
