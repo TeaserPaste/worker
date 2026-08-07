@@ -35,6 +35,8 @@ env:
   # Logging & Notify
   D1_LOG_API_URL: ${{ secrets.D1_LOG_API_URL }}
   DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+  # AI
+  OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
 
 # Các Jobs cần chạy
 jobs:
@@ -76,15 +78,8 @@ jobs:
         env:
           LOG_LEVEL: ${{ github.event.inputs.log_level || env.LOG_LEVEL_DEFAULT }}
         run: |
-          #echo "Activating virtual environment and executing worker.py..."
+          echo "Activating virtual environment and executing worker.py..."
           # Kích hoạt venv (sử dụng cache hoặc cài mới)
-          #source .venv/bin/activate
+          source .venv/bin/activate
           # Chạy script Python
-          #python worker.py
-          python -c "
-          import os
-          key = os.getenv('OPENROUTER_API_KEY', '')
-          print(f'Key Length: {len(key)}')
-          assert len(key) > 0, 'CRITICAL: OPENROUTER_API_KEY is missing in GitHub Actions step!'
-          assert key.startswith('sk-or-v1-'), 'CRITICAL: Key format is invalid!'
-          "
+          python worker.py
