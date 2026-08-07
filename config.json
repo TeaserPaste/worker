@@ -1,7 +1,7 @@
 {
   "THRESHOLDS": {
     "optimal_length": 4000,
-    "min_length_for_analysis": 50,
+    "min_length_for_analysis": 15,
     "min_lines_for_complexity": 5,
     "max_line_length": 120,
     "min_avg_line_length": 15,

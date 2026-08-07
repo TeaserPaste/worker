@@ -23,27 +23,6 @@ PII_REGEX_PATTERNS = [
 ]
 
 
-def _is_gibberish(text: str) -> bool:
-    # Select only long words consisting entirely of letters (no numbers, underscores, or camelCase)
-    words = [w for w in re.findall(r"\b[a-zA-Z]{6,}\b", text) if w.islower() or w.isupper()]
-    
-    if len(words) < 8:  # Insufficient natural text to conclude that it is gibberish
-        return False
-
-    text_to_check = "".join(words)
-    vowels = "aeiou"
-    consonants = "bcdfghjklmnpqrstvwxyz"
-
-    v_count = sum(1 for c in text_to_check.lower() if c in vowels)
-    c_count = sum(1 for c in text_to_check.lower() if c in consonants)
-
-    if v_count + c_count == 0:
-        return False
-
-    ratio = v_count / (v_count + c_count)
-    return not (0.15 < ratio < 0.65)
-
-
 def is_spam_or_trivial(content: str, language: str) -> bool:
     """Advanced check for spam, trivial, or obfuscated content."""
     if not content or not content.strip():
@@ -67,16 +46,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
         if pattern.search(content_to_check):
             return True
 
-    # Rule 3: Gibberish detection
-    words = re.findall(r"\b\w{12,}\b", content_to_check)  # Check longer words
-    if len(words) > 5 and _is_gibberish("".join(words)):
-        return True
-
-    # Rule 4: Detect long, unbroken strings (potential Base64/obfuscation)
-    if any(len(word) > THRESHOLDS["long_unbroken_string"] for word in content_to_check.split()):
-        return True
-
-    # Rule 5: Highly repetitive characters (refined)
+    # Rule 3: Highly repetitive characters (refined)
     char_counts = Counter(c for c in content_to_check if not c.isspace())
     total_non_space = sum(char_counts.values())
     if char_counts and total_non_space > 30:
@@ -84,7 +54,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
         if most_common_count / total_non_space > 0.85:
             return True
 
-    # Rule 6: Excessive URLs or spam TLDs
+    # Rule 4: Excessive URLs or spam TLDs
     urls = re.findall(r"https?://[^\s/$.?#].[^\s]*", content_to_check)
     if len(urls) > 4:
         return True
