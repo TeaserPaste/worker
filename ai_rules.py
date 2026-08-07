@@ -28,7 +28,7 @@ def check_content_safety(content: str, openrouter_key: str) -> tuple[bool, str]:
                 {"role": "user", "content": [{"type": "text", "text": safety_check_text}]}
             ],
             "temperature": 0.0,
-            "max_tokens": 100,
+            "max_tokens": 200,
         }
         logging.debug(f"Calling Nemotron API with length: {len(safety_check_text)}")
         response = http_session.post(
@@ -70,7 +70,7 @@ def get_ai_priority_rating(content: str, language: str, openrouter_key: str) -> 
             "model": AI_CONFIG["COHERE_MODEL"],
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 150,
+            "max_tokens": 1000,
         }
         logging.debug(f"Calling Cohere API with length: {len(prompt_content)}")
         response = http_session.post(
