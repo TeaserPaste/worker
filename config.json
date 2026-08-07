@@ -1,7 +1,7 @@
 {
   "THRESHOLDS": {
     "optimal_length": 4000,
-    "min_length_for_analysis": 80,
+    "min_length_for_analysis": 50,
     "min_lines_for_complexity": 5,
     "max_line_length": 120,
     "min_avg_line_length": 15,
@@ -116,9 +116,9 @@
     "python_async": [["python", "async def"], 2.5],
     "api_design": [["graphql", "resolver"], 2.2]
   },
-  "SPAM_REGEX_BLACKLIST": [
-    "buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra",
-    "(\\b\\w+\\b\\s*){1,2}Copyright \\d{4}"
+    "SPAM_REGEX_BLACKLIST": [
+    "\\b(?:buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra)\\b",
+    "\\bCopyright \\d{4}\\s+(?:All rights reserved|Unauthorized)\\b"
   ],
   "SPAM_TLDS": [".xyz", ".top", ".tk", ".site", ".click", ".loan", ".online"],
   "NON_PROGRAMMING_LANGS": [
@@ -127,10 +127,10 @@
   ],
   "PII_REGEX_PATTERNS": [
     "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
-    "AIzaSy[A-Za-z0-9-_]{33}",
-    "amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
-    "da2-[a-z0-9]{26}",
-    "xox[bapr]-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}"
+    "\\bAIzaSy[A-Za-z0-9-_]{33}\\b",
+    "\\bamzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\\b",
+    "\\bda2-[a-z0-9]{26}\\b",
+    "\\bxox[bapr]-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}\\b"
   ],
   "AI_CONFIG": {
     "NEMOTRON_MODEL": "nvidia/nemotron-3.5-content-safety:free",

@@ -24,26 +24,23 @@ PII_REGEX_PATTERNS = [
 
 
 def _is_gibberish(text: str) -> bool:
-    """Checks for gibberish text based on vowel-to-consonant ratio."""
+    # Select only long words consisting entirely of letters (no numbers, underscores, or camelCase)
+    words = [w for w in re.findall(r"\b[a-zA-Z]{6,}\b", text) if w.islower() or w.isupper()]
+    
+    if len(words) < 8:  # Insufficient natural text to conclude that it is gibberish
+        return False
+
+    text_to_check = "".join(words)
     vowels = "aeiou"
     consonants = "bcdfghjklmnpqrstvwxyz"
 
-    v_count = 0
-    c_count = 0
-
-    for char in text.lower():
-        if char in vowels:
-            v_count += 1
-        elif char in consonants:
-            c_count += 1
+    v_count = sum(1 for c in text_to_check.lower() if c in vowels)
+    c_count = sum(1 for c in text_to_check.lower() if c in consonants)
 
     if v_count + c_count == 0:
-        return False  # Not enough alphabetic characters to judge
+        return False
 
     ratio = v_count / (v_count + c_count)
-
-    # Typical English text has a vowel ratio of ~35-45%
-    # Ratios outside 15-65% are suspicious
     return not (0.15 < ratio < 0.65)
 
 
@@ -71,7 +68,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
             return True
 
     # Rule 3: Gibberish detection
-    words = re.findall(r"\b\w{5,}\b", content_to_check)  # Check longer words
+    words = re.findall(r"\b\w{12,}\b", content_to_check)  # Check longer words
     if len(words) > 5 and _is_gibberish("".join(words)):
         return True
 
@@ -84,7 +81,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
     total_non_space = sum(char_counts.values())
     if char_counts and total_non_space > 30:
         most_common_count = char_counts.most_common(1)[0][1]
-        if most_common_count / total_non_space > 0.6:  # Lowered threshold
+        if most_common_count / total_non_space > 0.85:
             return True
 
     # Rule 6: Excessive URLs or spam TLDs
