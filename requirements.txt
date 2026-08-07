@@ -3,4 +3,3 @@ opensearch-py
 python-dotenv
 requests
 boto3
-pygments
