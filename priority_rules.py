@@ -190,33 +190,33 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
     stripped_content = content.strip() if content else ""
     if len(stripped_content) < 15:
         logging.debug("Rejected: Content too short")
-        return 0.1, "Assessment: Rejected (Too short - less than 15 characters).", None
+        return 0.1, "Assessment: Rejected (Too short - less than 15 characters).", "rejected"
 
     # 3. Too Long check (1000+ lines)
     if len(content.splitlines()) >= 1000:
         logging.debug("Rejected: Too long (1000+ lines)")
-        return 0.1, "Assessment: Rejected (Too long - 1000+ lines).", None
+        return 0.1, "Assessment: Rejected (Too long - 1000+ lines).", "rejected"
 
     # 4. Too Long check (50000+ characters)
     if len(content) >= 50000:
         logging.debug("Rejected: Too long (50000+ characters)")
-        return 0.1, "Assessment: Rejected (Too long - 50000+ characters).", None
+        return 0.1, "Assessment: Rejected (Too long - 50000+ characters).", "rejected"
 
     # 5. Lock files & default configs check
     if is_lock_file_or_default_config(content, lang):
         logging.debug("Rejected: Lock file or default framework configuration file")
-        return 0.1, "Assessment: Rejected (Lock file or default framework configuration file).", None
+        return 0.1, "Assessment: Rejected (Lock file or default framework configuration file).", "rejected"
 
     # 6. Likely spam checks (Reusing spam regex checking helper)
     if has_spam_patterns(content):
         logging.debug("Rejected: Spam detected")
-        return 0.1, "Assessment: Rejected (Spam detected).", None
+        return 0.1, "Assessment: Rejected (Spam detected).", "rejected"
 
     # 7. Sensitive public UGC / PII checks
     # Local pattern pre-check
     if has_pii(content):
         logging.debug("Rejected: Sensitive information/PII detected via local checks")
-        return 0.1, "Assessment: Rejected (Sensitive information detected via local checks).", None
+        return 0.1, "Assessment: Rejected (Sensitive information detected via local checks).", "rejected"
 
     # From here, we are doing AI Routing!
     try:
@@ -237,7 +237,11 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
                 ai_score, ai_assessment = get_non_programming_priority_rating(content, lang, openrouter_key)
                 if ai_score is not None:
                     return ai_score, ai_assessment, "completed"
-            # Fallback to Rule-based calculation if AI is disabled or fails
+                else:
+                    logging.info("Falling back to robust rule-based priority calculation due to non-programming AI failure.")
+                    fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
+                    return fallback_score, fallback_assessment, "failed"
+            # Fallback to Rule-based calculation if AI is disabled
             logging.info("Falling back to robust rule-based priority calculation for non-programming language.")
             fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
             return fallback_score, fallback_assessment, None
@@ -247,8 +251,12 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
             ai_score, ai_assessment = get_ai_priority_rating(content, lang, openrouter_key)
             if ai_score is not None:
                 return ai_score, ai_assessment, "completed"
+            else:
+                logging.info("Falling back to robust rule-based priority calculation due to AI failure.")
+                fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
+                return fallback_score, fallback_assessment, "failed"
 
-        # Fallback to Rule-based calculation if AI is disabled or fails
+        # Fallback to Rule-based calculation if AI is disabled
         logging.info("Falling back to robust rule-based priority calculation.")
         fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
         return fallback_score, fallback_assessment, None
@@ -257,4 +265,8 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
         logging.warning(f"AI routing encountered 429 error: {e}. Bypassing with pending status.")
         fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
         return fallback_score, fallback_assessment, "pending"
+    except Exception as e:
+        logging.error(f"AI routing encountered general error: {e}. Bypassing with failed status.", exc_info=True)
+        fallback_score, fallback_assessment = calculate_priority_rule_based(content, lang, created_at)
+        return fallback_score, fallback_assessment, "failed"
 
