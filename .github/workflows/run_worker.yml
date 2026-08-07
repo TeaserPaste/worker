@@ -61,7 +61,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-venv-
 
-      # --- Cài đặt dependencies (BƯỚC MỚI) ---
+      # --- Cài đặt dependencies ---
       - name: 🛠️ Install dependencies
         if: steps.cache-venv.outputs.cache-hit != 'true'
         run: |
@@ -76,8 +76,15 @@ jobs:
         env:
           LOG_LEVEL: ${{ github.event.inputs.log_level || env.LOG_LEVEL_DEFAULT }}
         run: |
-          echo "Activating virtual environment and executing worker.py..."
+          #echo "Activating virtual environment and executing worker.py..."
           # Kích hoạt venv (sử dụng cache hoặc cài mới)
-          source .venv/bin/activate
+          #source .venv/bin/activate
           # Chạy script Python
-          python worker.py
+          #python worker.py
+          python -c "
+          import os
+          key = os.getenv('OPENROUTER_API_KEY', '')
+          print(f'Key Length: {len(key)}')
+          assert len(key) > 0, 'CRITICAL: OPENROUTER_API_KEY is missing in GitHub Actions step!'
+          assert key.startswith('sk-or-v1-'), 'CRITICAL: Key format is invalid!'
+          "
