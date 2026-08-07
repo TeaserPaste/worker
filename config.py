@@ -7,11 +7,11 @@ from opensearchpy import OpenSearch
 import boto3
 from botocore.client import Config
 
-# --- Cấu hình logging ---
+# --- Logging Configuration ---
 log_level_env = os.environ.get('LOG_LEVEL', 'INFO').upper()
 log_level = log_level_env if log_level_env else 'INFO'
 
-# Set logging level cho module priority_rules
+# Set logging level for priority_rules module
 logging.getLogger("priority_rules").setLevel(logging.DEBUG if log_level == 'DEBUG' else logging.INFO)
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
@@ -23,7 +23,7 @@ logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - [%(fu
 # Load .env 
 load_dotenv()
 
-# --- Khởi tạo Firebase Admin SDK ---
+# --- Initialize Firebase Admin SDK ---
 db = None
 try:
     if not firebase_admin._apps:
@@ -73,12 +73,12 @@ if not opensearch_host:
 else:
     auth = (opensearch_user, opensearch_password) if opensearch_user and opensearch_password else None
     try:
-        # Bỏ verify_certs=True nếu scheme là http, nhưng tốt nhất nên dùng https
+        # Omit verify_certs=True if the scheme is http, but using https is best.
         verify_certs_val = opensearch_scheme == "https"
         os_client = OpenSearch(
             hosts=[{'host': opensearch_host, 'port': opensearch_port}], http_auth=auth,
             use_ssl=opensearch_scheme == "https", 
-            verify_certs=verify_certs_val, # Chỉ kiểm tra certs nếu dùng HTTPS
+            verify_certs=verify_certs_val, # Only check certificates if using HTTPS
             ssl_assert_hostname=False, 
             ssl_show_warn=False,
             timeout=90, retry_on_timeout=True, max_retries=2

@@ -1,23 +1,26 @@
+import os
+import json
 import logging
 import re
 import datetime
 from collections import Counter
 import math
+import requests
 import pygments
-from pygments.lexers import get_lexer_by_name, guess_lexer
+from pygments.lexers import get_lexer_by_name
 from pygments.token import Token, String, Comment
 
-# --- Cấu hình Trọng số (Weights) và Ngưỡng (Thresholds) ---
-# Ngưỡng và Giá trị tối ưu
+# --- Weight and Threshold Configurations ---
+# Thresholds and Optimal Values
 THRESHOLDS = {
-    'optimal_length': 4000,  # Chiều dài tối ưu cho snippet
-    'min_length_for_analysis': 80, # Giảm nhẹ ngưỡng tối thiểu
-    'min_lines_for_complexity': 5, # Số dòng tối thiểu để đánh giá độ phức tạp
-    'max_line_length': 120,  # Phạt các dòng quá dài
-    'min_avg_line_length': 15, # Phạt các dòng quá ngắn (tránh code bị gộp dòng)
-    'long_comment_threshold': 20, # Số ký tự tối thiểu cho một comment chất lượng
-    'gibberish_threshold': 0.4, # Ngưỡng phát hiện vô nghĩa (tỷ lệ nguyên âm/phụ âm)
-    'long_unbroken_string': 100 # Ngưỡng phát hiện Base64/obfuscation
+    'optimal_length': 4000,  # Optimal length for snippet
+    'min_length_for_analysis': 80,  # Reduce minimum threshold slightly
+    'min_lines_for_complexity': 5,  # Minimum lines to evaluate complexity
+    'max_line_length': 120,  # Penalize too long lines
+    'min_avg_line_length': 15,  # Penalize too short lines (avoid collapsed/merged lines)
+    'long_comment_threshold': 20,  # Minimum characters for a quality comment
+    'gibberish_threshold': 0.4,  # Gibberish detection threshold (vowel/consonant ratio)
+    'long_unbroken_string': 100  # Base64/obfuscation detection threshold
 }
 
 # --- Language Profiles ---
@@ -124,20 +127,20 @@ LANGUAGE_PROFILES = {
     }
 }
 
-# Các "Contextual Combos": nhân điểm thưởng nếu các cặp từ khóa xuất hiện cùng nhau
+# Contextual Combos: multiply bonus points if keyword pairs appear together
 CONTEXTUAL_COMBOS = {
     'react_hooks': (['react', 'useEffect'], 2.0),
     'python_async': (['python', 'async def'], 2.5),
     'api_design': (['graphql', 'resolver'], 2.2)
 }
 
-# Regex cho các mẫu spam hoặc code chất lượng rất thấp
+# Regex for spam patterns or very low-quality code
 SPAM_REGEX_BLACKLIST = [
-    re.compile(r'buy now|crypto|forex|free trial|seo services|online casino', re.IGNORECASE),
-    re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE) # "MyComponent Copyright 2023"
+    re.compile(r'buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra', re.IGNORECASE),
+    re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE)  # "MyComponent Copyright 2023"
 ]
 
-# Các TLDs (Top-Level Domains) phổ biến trong spam
+# Common spam TLDs (Top-Level Domains)
 SPAM_TLDS = {'.xyz', '.top', '.tk', '.site', '.click', '.loan', '.online'}
 
 
@@ -147,6 +150,7 @@ def get_base_priority(language: str) -> float:
     """Gets the base score for the language."""
     profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
     return profile['base_score']
+
 
 def _is_gibberish(text: str) -> bool:
     """Checks for gibberish text based on vowel-to-consonant ratio."""
@@ -163,7 +167,7 @@ def _is_gibberish(text: str) -> bool:
             c_count += 1
 
     if v_count + c_count == 0:
-        return False # Not enough alphabetic characters to judge
+        return False  # Not enough alphabetic characters to judge
 
     ratio = v_count / (v_count + c_count)
 
@@ -171,13 +175,14 @@ def _is_gibberish(text: str) -> bool:
     # Ratios outside 15-65% are suspicious
     return not (0.15 < ratio < 0.65)
 
+
 def is_spam_or_trivial(content: str, language: str) -> bool:
     """Advanced check for spam, trivial, or obfuscated content."""
     if not content or not content.strip():
         return True
-    
+
     content_to_check = content[:2000].strip()
-    
+
     # Rule 1: Very short content without high-value keywords
     if len(content_to_check) < THRESHOLDS['min_length_for_analysis']:
         content_lower = content_to_check.lower()
@@ -192,7 +197,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
             return True
 
     # Rule 3: Gibberish detection
-    words = re.findall(r'\b\w{5,}\b', content_to_check) # Check longer words
+    words = re.findall(r'\b\w{5,}\b', content_to_check)  # Check longer words
     if len(words) > 5 and _is_gibberish("".join(words)):
         return True
 
@@ -205,7 +210,7 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
     total_non_space = sum(char_counts.values())
     if char_counts and total_non_space > 30:
         most_common_count = char_counts.most_common(1)[0][1]
-        if most_common_count / total_non_space > 0.6: # Lowered threshold
+        if most_common_count / total_non_space > 0.6:  # Lowered threshold
             return True
 
     # Rule 6: Excessive URLs or spam TLDs
@@ -217,28 +222,29 @@ def is_spam_or_trivial(content: str, language: str) -> bool:
 
     return False
 
+
 def calculate_age_decay(created_at: datetime.datetime, language: str) -> float:
     """Calculates age score based on decay rate."""
     profile = LANGUAGE_PROFILES.get(language.lower(), LANGUAGE_PROFILES['default'])
     decay_days = profile['decay_days']
-    
+
     # Ensure created_at is timezone-aware
     if created_at.tzinfo is None:
         created_at = created_at.replace(tzinfo=datetime.timezone.utc)
-    
+
     now = datetime.datetime.now(datetime.timezone.utc)
     age_days = (now - created_at).days
-    
+
     if age_days < 0:
-        return 1.0 # Future date, max score
-        
-    # Tính điểm Decay: Điểm max là 1.0 (mới nhất), giảm dần về 0.0
-    # Công thức: max(0.2, 1.0 - (age_days / decay_days))
-    
-    # Giảm điểm tuyến tính. Snippet cũ hơn decay_days sẽ có điểm 0.2 (min)
+        return 1.0  # Future date, max score
+
+    # Calculate Decay score: Max score is 1.0 (newest), decaying to 0.0
+    # Formula: max(0.2, 1.0 - (age_days / decay_days))
+
+    # Linear decay. Snippet older than decay_days will have score 0.2 (min)
     decay_score = 1.0 - (age_days / decay_days)
-    
-    # Đặt ngưỡng tối thiểu (ví dụ: 0.2)
+
+    # Set minimum threshold (e.g. 0.2)
     return max(0.2, decay_score)
 
 
@@ -250,7 +256,7 @@ def analyze_structural_complexity(content: str, language: str) -> float:
     try:
         lexer = get_lexer_by_name(language, stripall=False)
     except pygments.util.ClassNotFound:
-        # Lỗi nghiêm trọng: nếu 'plaintext' cũng không tìm thấy, fallback an toàn
+        # Critical error: if 'plaintext' is also not found, safe fallback
         try:
             lexer = get_lexer_by_name('plaintext', stripall=False)
         except pygments.util.ClassNotFound:
@@ -286,13 +292,13 @@ def analyze_structural_complexity(content: str, language: str) -> float:
 
     # --- Language-Specific Heuristics ---
     lang_lower = language.lower()
-    
+
     if lang_lower == 'python':
         if 'async' in token_values and 'def' in token_values:
             language_specific_bonus += 0.15
-        if '@' in token_values: # Decorators
+        if '@' in token_values:  # Decorators
             language_specific_bonus += 0.10
-    
+
     elif lang_lower in ['javascript', 'typescript']:
         if 'async' in token_values and '=>' in token_values:
             language_specific_bonus += 0.15
@@ -353,6 +359,7 @@ def analyze_structural_complexity(content: str, language: str) -> float:
 
     return min(1.0, final_score)
 
+
 def calculate_comment_utility(content: str, language: str) -> float:
     """
     Calculates utility score based on comment quality, readability, and structure.
@@ -369,7 +376,7 @@ def calculate_comment_utility(content: str, language: str) -> float:
 
     tokens = list(pygments.lex(content, lexer))
     lines = content.splitlines()
-    
+
     if not tokens or not lines:
         return 0.0
 
@@ -399,7 +406,7 @@ def calculate_comment_utility(content: str, language: str) -> float:
 
     # Bonus for docstrings (highly valuable)
     docstring_bonus = min(0.3, (docstring_chars / total_chars) * 3.0)
-    
+
     # 2. Comment Quality Score
     quality_score = 0.0
     if comment_chars > 0:
@@ -418,13 +425,13 @@ def calculate_comment_utility(content: str, language: str) -> float:
             line_len = len(line)
             total_line_length += line_len
             if line_len > THRESHOLDS['max_line_length']:
-                long_line_penalty += 0.05 # 5% penalty per long line
+                long_line_penalty += 0.05  # 5% penalty per long line
 
     avg_line_length = total_line_length / num_code_lines if num_code_lines > 0 else 0
     short_line_penalty = 0
     if num_code_lines > THRESHOLDS['min_lines_for_complexity'] and avg_line_length < THRESHOLDS['min_avg_line_length']:
         short_line_penalty = (THRESHOLDS['min_avg_line_length'] - avg_line_length) / THRESHOLDS['min_avg_line_length'] * 0.5
-    
+
     readability_score = 1.0 - min(0.5, long_line_penalty) - short_line_penalty
 
     # --- Final Combination ---
@@ -437,56 +444,44 @@ def calculate_comment_utility(content: str, language: str) -> float:
     return max(0.0, min(1.0, final_score))
 
 
-# --- MAIN CALCULATION FUNCTION ---
+# --- ORIGINAL RULE-BASED SCORING FALLBACK ---
 
-# SỬA LỖI: Thay đổi kiểu trả về từ (float, str) sang tuple[float, str]
-def calculate_priority(content: str, language: str, created_at: datetime.datetime, is_verified: bool = False) -> tuple[float, str]:
+def calculate_priority_rule_based(content: str, language: str, created_at: datetime.datetime) -> tuple[float, str]:
     """
-    Calculates the final priority score (0.1 to 1.0) using the advanced rule-based engine.
-    
-    Returns: (priority_score, assessment_string)
+    Original robust rule-based priority score calculation. Used as a safe fallback.
     """
-
-    if is_verified:
-        return 1.0, "Assessment: Overridden by Admin Manual Verification."
-
     lang = language.lower() if language else 'plaintext'
-    
-    # --- PHASE 1: PRE-CHECK (Spam/Trivial Rule) ---
+
     if is_spam_or_trivial(content, lang):
         return 0.1, "Assessment: Rejected (Trivial or Spam)."
-    
+
     lang_base_score = get_base_priority(lang)
     content_length = len(content)
-    
-    # --- PHASE 2: SCORE COMPONENTS ---
-    
+
     # 1. Length Score
     optimal_length = THRESHOLDS['optimal_length']
     if content_length <= optimal_length:
         length_score = content_length / optimal_length
     else:
-        # Áp dụng hàm suy giảm (decay) cho các snippet quá dài
-        # Công thức: score = 0.2 + 0.8 * e^(-(length_ratio - 1)^2 / 4)
-        # Bắt đầu giảm từ 1.0 và tiệm cận 0.2
+        # Apply decay function for snippets that are too long
+        # Formula: score = 0.2 + 0.8 * e^(-(length_ratio - 1)^2 / 4)
+        # Starts decreasing from 1.0 and asymptotes to 0.2
         length_ratio = content_length / optimal_length
         decay_factor = math.exp(-((length_ratio - 1) ** 2) / 4)
         length_score = 0.2 + 0.8 * decay_factor
 
-    length_score = max(0.2, min(1.0, length_score)) # Đảm bảo score trong khoảng [0.2, 1.0]
+    length_score = max(0.2, min(1.0, length_score))  # Ensure score is within [0.2, 1.0]
 
     # 2. Age Decay Score
     age_score = calculate_age_decay(created_at, lang)
-    
+
     # 3. Structural Complexity Score (Code-aware analysis)
     syntax_score = analyze_structural_complexity(content, lang)
-    
+
     # 4. Comment & Readability Utility Score
     utility_score = calculate_comment_utility(content, lang)
-    
+
     # --- PHASE 3: FINAL CALCULATION ---
-    
-    # Calculate raw score using the new weights
     lang_profile = LANGUAGE_PROFILES.get(lang, LANGUAGE_PROFILES['default'])
     weights = lang_profile['scoring_weights']
 
@@ -496,16 +491,12 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
         weights['utility'] * utility_score +
         weights['age'] * age_score
     )
-    
-    # The final priority is a blend of the language's base score and the calculated raw score.
-    # This ensures that good code in a low-priority language is still ranked lower than
-    # exceptional code in a high-priority language.
+
     final_priority = lang_base_score + (1.0 - lang_base_score) * raw_score
-    
+
     # Ensure the score is within the valid range [0.1, 1.0]
     final_priority = max(0.1, min(1.0, final_priority))
-    
-    # --- ASSESSMENT STRING ---
+
     assessment_details = (
         f"Length:{length_score:.2f} (w:{weights['length']}), "
         f"Syntax:{syntax_score:.2f} (w:{weights['syntax']}), "
@@ -513,5 +504,153 @@ def calculate_priority(content: str, language: str, created_at: datetime.datetim
         f"Age:{age_score:.2f} (w:{weights['age']})"
     )
     assessment_string = f"Priority={final_priority:.3f} | Details: {assessment_details}"
-    
+
     return final_priority, assessment_string
+
+
+# --- MAIN CALCULATION ENTRYPOINT ---
+
+def calculate_priority(content: str, language: str, created_at: datetime.datetime, is_verified: bool = False) -> tuple[float, str]:
+    """
+    Calculates the final priority score (0.1 to 1.0) using hybrid priority logic (Regex -> AI).
+    
+    Returns: (priority_score, assessment_string)
+    """
+    # 1. Admin Verification Overrides
+    if is_verified:
+        return 1.0, "Assessment: Overridden by Admin Manual Verification."
+
+    lang = language.lower() if language else 'plaintext'
+
+    # 2. Too Short check (< 15 characters)
+    stripped_content = content.strip() if content else ""
+    if len(stripped_content) < 15:
+        return 0.1, "Assessment: Rejected (Too short - less than 15 characters)."
+
+    # 3. Too Long check (1000+ lines)
+    if len(content.splitlines()) >= 1000:
+        return 0.1, "Assessment: Rejected (Too long - 1000+ lines)."
+
+    # 4. Too Long check (50000+ characters)
+    if len(content) >= 50000:
+        return 0.1, "Assessment: Rejected (Too long - 50000+ characters)."
+
+    # 5. Non-programming languages check
+    NON_PROGRAMMING_LANGS = {
+        'markdown', 'plaintext', 'text', 'config', 'csv', 'txt', 'md', 'cfg', 'none', 'properties',
+        'json', 'yaml', 'yml', 'toml', 'ini', 'xml'
+    }
+    if lang in NON_PROGRAMMING_LANGS:
+        return 0.1, "Assessment: Rejected (Non-programming language)."
+
+    # 6. Likely spam checks
+    SPAM_PATTERNS = [
+        re.compile(r'buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra', re.IGNORECASE),
+        re.compile(r'(\b\w+\b\s*){1,2}Copyright \d{4}', re.IGNORECASE)
+    ]
+    if any(pattern.search(content) for pattern in SPAM_PATTERNS):
+        return 0.1, "Assessment: Rejected (Spam detected)."
+
+    # 7. Sensitive public UGC / PII checks
+    # Local pattern pre-check
+    PII_REGEX_PATTERNS = [
+        re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'),
+        re.compile(r'AIzaSy[A-Za-z0-9-_]{33}'),  # Google API Key
+        re.compile(r'amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'),  # AWS MWS
+        re.compile(r'da2-[a-z0-9]{26}'),  # AWS AppSync
+        re.compile(r'xox[bapr]-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}'),  # Slack Token
+    ]
+    if any(pattern.search(content) for pattern in PII_REGEX_PATTERNS):
+        return 0.1, "Assessment: Rejected (Sensitive information detected via local checks)."
+
+    # External Nemotron safety check
+    openrouter_key = os.getenv("OPENROUTER_API_KEY")
+    if openrouter_key:
+        try:
+            safety_check_text = content[:5000]
+            payload = {
+                "model": "nvidia/nemotron-3.5-content-safety:free",
+                "messages": [
+                    {"role": "user", "content": [{"type": "text", "text": safety_check_text}]}
+                ],
+                "temperature": 0.0,
+                "max_tokens": 100
+            }
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openrouter_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=15
+            )
+            if response.status_code == 200:
+                resp_json = response.json()
+                choices = resp_json.get("choices", [])
+                if choices:
+                    resp_text = choices[0].get("message", {}).get("content", "")
+                    if "user safety: unsafe" in resp_text.lower():
+                        return 0.1, "Assessment: Rejected (Sensitive information or unsafe content flagged by AI)."
+            else:
+                logging.warning(f"Nemotron API returned status {response.status_code}: {response.text}")
+        except Exception as e:
+            logging.warning(f"Failed to check content safety with Nemotron: {e}")
+
+    # 8. Main LLM Priority Rating with cohere/north-mini-code:free
+    if openrouter_key:
+        try:
+            prompt_content = content[:5000]
+            prompt = (
+                "You are an expert code quality and importance analyzer. Analyze the following code snippet and rate its priority "
+                "for syncing and search index. Higher values (0.6 - 1.0) represent important, educational, or highly reusable code (e.g. algorithms, "
+                "React/Vue/Svelte components, decorators, context managers, API routes, custom hooks). Lower values (0.1 - 0.4) represent trivial, boilerplate, or low importance "
+                "code (e.g. simple hello world, basic print statements, trivial functions, plain html template).\n\n"
+                f"Snippet Language: {lang}\n"
+                f"Snippet Content:\n{prompt_content}\n\n"
+                "You must respond with ONLY a JSON object containing these two fields:\n"
+                "- \"priority_score\": a float between 0.1 and 1.0\n"
+                "- \"assessment_details\": a concise string (max 100 characters) explaining the rating details\n"
+                "JSON:"
+            )
+            payload = {
+                "model": "cohere/north-mini-code:free",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 150
+            }
+            response = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openrouter_key}",
+                    "Content-Type": "application/json"
+                },
+                json=payload,
+                timeout=20
+            )
+            if response.status_code == 200:
+                resp_json = response.json()
+                choices = resp_json.get("choices", [])
+                if choices:
+                    resp_text = choices[0].get("message", {}).get("content", "").strip()
+                    match = re.search(r'\{.*\}', resp_text, re.DOTALL)
+                    if match:
+                        try:
+                            data = json.loads(match.group(0))
+                            score = float(data.get("priority_score", 0.1))
+                            details = str(data.get("assessment_details", "No details provided."))
+                            score = max(0.1, min(1.0, score))
+                            return score, f"Priority={score:.3f} | Details: {details}"
+                        except Exception as parse_err:
+                            logging.warning(f"Failed to parse JSON from Cohere model: {parse_err}. Content: {resp_text}")
+            else:
+                logging.warning(f"Cohere API returned status {response.status_code}: {response.text}")
+        except Exception as e:
+            logging.warning(f"Failed to get priority rating from Cohere: {e}")
+
+    # Fallback to Rule-based calculation if AI is disabled or fails
+    logging.info("Falling back to robust rule-based priority calculation.")
+    return calculate_priority_rule_based(content, lang, created_at)
+
