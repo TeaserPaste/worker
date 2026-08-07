@@ -1,0 +1,143 @@
+{
+  "THRESHOLDS": {
+    "optimal_length": 4000,
+    "min_length_for_analysis": 80,
+    "min_lines_for_complexity": 5,
+    "max_line_length": 120,
+    "min_avg_line_length": 15,
+    "long_comment_threshold": 20,
+    "gibberish_threshold": 0.4,
+    "long_unbroken_string": 100
+  },
+  "LANGUAGE_PROFILES": {
+    "python": {
+      "base_score": 0.60,
+      "decay_days": 90,
+      "scoring_weights": {"length": 0.15, "syntax": 0.45, "utility": 0.30, "age": 0.10},
+      "high_value_keywords": {
+        "fastapi": 2.0, "pydantic": 2.0, "decorator": 2.0, "contextmanager": 2.2,
+        "pandas": 2.0, "numpy": 1.8, "scikitlearn": 2.2, "pytorch": 2.5, "tensorflow": 2.5,
+        "async": 1.8, "await": 1.5
+      }
+    },
+    "javascript": {
+      "base_score": 0.50,
+      "decay_days": 60,
+      "scoring_weights": {"length": 0.20, "syntax": 0.45, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {
+        "react": 1.5, "vue": 1.5, "svelte": 1.8, "nextjs": 2.2, "vite": 1.5,
+        "useEffect": 2.5, "useState": 2.0, "redux": 1.8, "tailwind": 1.7,
+        "async": 1.8, "await": 1.5, "Promise": 1.5
+      }
+    },
+    "typescript": {
+      "base_score": 0.60,
+      "decay_days": 60,
+      "scoring_weights": {"length": 0.20, "syntax": 0.45, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {
+        "react": 1.5, "vue": 1.5, "svelte": 1.8, "nextjs": 2.2, "vite": 1.5,
+        "useEffect": 2.5, "useState": 2.0, "redux": 1.8, "tailwind": 1.7,
+        "interface": 2.0, "enum": 1.5, "type": 1.5
+      }
+    },
+    "java": {
+      "base_score": 0.55,
+      "decay_days": 180,
+      "scoring_weights": {"length": 0.25, "syntax": 0.40, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {"spring": 2.0, "maven": 1.5}
+    },
+    "csharp": {
+      "base_score": 0.55,
+      "decay_days": 180,
+      "scoring_weights": {"length": 0.25, "syntax": 0.40, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {".net": 2.0, "linq": 1.8}
+    },
+    "go": {
+      "base_score": 0.45,
+      "decay_days": 120,
+      "scoring_weights": {"length": 0.25, "syntax": 0.40, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {"goroutine": 2.0, "channel": 1.8}
+    },
+    "rust": {
+      "base_score": 0.45,
+      "decay_days": 120,
+      "scoring_weights": {"length": 0.25, "syntax": 0.40, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {"cargo": 1.5, "tokio": 2.0}
+    },
+    "sql": {
+      "base_score": 0.35,
+      "decay_days": 365,
+      "scoring_weights": {"length": 0.30, "syntax": 0.40, "utility": 0.20, "age": 0.10},
+      "high_value_keywords": {"join": 1.5, "with": 1.8, "group by": 1.5, "window function": 2.5}
+    },
+    "markdown": {
+      "base_score": 0.15,
+      "decay_days": 120,
+      "scoring_weights": {"length": 0.40, "syntax": 0.10, "utility": 0.40, "age": 0.10},
+      "high_value_keywords": {}
+    },
+    "plaintext": {
+      "base_score": 0.10,
+      "decay_days": 120,
+      "scoring_weights": {"length": 0.50, "syntax": 0.10, "utility": 0.30, "age": 0.10},
+      "high_value_keywords": {}
+    },
+    "bash": {
+      "base_score": 0.30,
+      "decay_days": 180,
+      "scoring_weights": {"length": 0.30, "syntax": 0.40, "utility": 0.20, "age": 0.10},
+      "high_value_keywords": {"grep": 1.2, "awk": 1.5, "sed": 1.5}
+    },
+    "html": {
+      "base_score": 0.30,
+      "decay_days": 180,
+      "scoring_weights": {"length": 0.40, "syntax": 0.20, "utility": 0.30, "age": 0.10},
+      "high_value_keywords": {}
+    },
+    "css": {
+      "base_score": 0.25,
+      "decay_days": 180,
+      "scoring_weights": {"length": 0.40, "syntax": 0.30, "utility": 0.20, "age": 0.10},
+      "high_value_keywords": {}
+    },
+    "default": {
+      "base_score": 0.30,
+      "decay_days": 120,
+      "scoring_weights": {"length": 0.25, "syntax": 0.40, "utility": 0.25, "age": 0.10},
+      "high_value_keywords": {
+        "dockerfile": 3.0, "kubernetes": 3.0, "terraform": 2.8, "aws lambda": 2.5,
+        "ci/cd": 2.2, "github actions": 2.2, "argocd": 2.7, "microservice": 2.5,
+        "graphql": 2.3, "grpc": 2.5
+      }
+    }
+  },
+  "CONTEXTUAL_COMBOS": {
+    "react_hooks": [["react", "useEffect"], 2.0],
+    "python_async": [["python", "async def"], 2.5],
+    "api_design": [["graphql", "resolver"], 2.2]
+  },
+  "SPAM_REGEX_BLACKLIST": [
+    "buy now|crypto|forex|free trial|seo services|online casino|credit score|cheap drugs|viagra",
+    "(\\b\\w+\\b\\s*){1,2}Copyright \\d{4}"
+  ],
+  "SPAM_TLDS": [".xyz", ".top", ".tk", ".site", ".click", ".loan", ".online"],
+  "NON_PROGRAMMING_LANGS": [
+    "markdown", "plaintext", "text", "config", "csv", "txt", "md", "cfg", "none", "properties",
+    "json", "yaml", "yml", "toml", "ini", "xml"
+  ],
+  "PII_REGEX_PATTERNS": [
+    "-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----",
+    "AIzaSy[A-Za-z0-9-_]{33}",
+    "amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    "da2-[a-z0-9]{26}",
+    "xox[bapr]-[0-9]{12}-[0-9]{12}-[a-zA-Z0-9]{24}"
+  ],
+  "AI_CONFIG": {
+    "NEMOTRON_MODEL": "nvidia/nemotron-3.5-content-safety:free",
+    "NEMOTRON_TIMEOUT": 15,
+    "COHERE_MODEL": "cohere/north-mini-code:free",
+    "COHERE_TIMEOUT": 20,
+    "COHERE_PROMPT_TEMPLATE": "You are an expert code quality and importance analyzer. Analyze the following code snippet and rate its priority for syncing and search index. Higher values (0.6 - 1.0) represent important, educational, or highly reusable code (e.g. algorithms, React/Vue/Svelte components, decorators, context managers, API routes, custom hooks). Lower values (0.1 - 0.4) represent trivial, boilerplate, or low importance code (e.g. simple hello world, basic print statements, trivial functions, plain html template).\n\nSnippet Language: {lang}\nSnippet Content:\n{prompt_content}\n\nYou must respond with ONLY a JSON object containing these two fields:\n- \"priority_score\": a float between 0.1 and 1.0\n- \"assessment_details\": a concise string (max 100 characters) explaining the rating details\nJSON:"
+  }
+}
+
